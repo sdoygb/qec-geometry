@@ -94,7 +94,7 @@ type** anyon signature, not Fibonacci.
 ## Install & use
 
 ```bash
-pip install numpy          # only hard dependency
+pip install qec-geometry   # from PyPI (numpy auto-installed)
 pip install stim pymatching  # needed only for the surface-code demo
 ```
 

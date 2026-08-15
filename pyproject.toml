@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "qecgeo"
+name = "qec-geometry"
 version = "0.1.0"
 description = "Geometric diagnostics for quantum error correction codes: A0/A1 error-pattern topology + threshold closed form + anyon typing"
 readme = "README.md"
