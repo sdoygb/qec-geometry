@@ -12,6 +12,9 @@ qecgeo  ──  Pauli algebra ── stabilizer framework ── code zoo ──
 
 ---
 
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21946024.svg)](https://doi.org/10.5281/zenodo.21946024)
+
 ## What it does
 
 ### 1. Error-pattern geometry: A0/A1 classification (surface code)
