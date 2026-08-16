@@ -64,6 +64,27 @@ def decode_surface(L, rounds, noise, shots, seed=None):
                 dt=time.time() - t0)
 
 
+def decode_circuit(circuit, shots, seed=None):
+    """任意 stim 电路解码全流程：电路 → DEM → 采样 → MWPM 解码 → 逻辑错误标记
+
+    与 decode_surface 相同，但接受任意 stim.Circuit（surface code / color code
+    / 任意 stabilizer 电路），电路生成与解码解耦。返回字段同 decode_surface。
+    """
+    import pymatching
+    import time
+    t0 = time.time()
+    dem = circuit.detector_error_model(decompose_errors=False)
+    matching = pymatching.Matching.from_detector_error_model(dem)
+    sampler = circuit.compile_detector_sampler(seed=seed)
+    dets, obs = sampler.sample(shots, separate_observables=True)
+    preds = matching.decode_batch(dets)
+    le = np.any(preds != obs, axis=1)
+    coords = get_detector_coords(circuit)
+    return dict(circuit=circuit, dets=dets, obs=obs, preds=preds, le=le,
+                coords=coords, matching=matching, n_det=dets.shape[1],
+                dt=time.time() - t0)
+
+
 # ---------- 2. 错误模式空间结构分析 ----------
 
 def _cluster_sizes(ps):
@@ -99,12 +120,19 @@ def _cluster_sizes(ps):
 
 
 def _global_extent(coords):
-    """码的全局边界（穿越判据用）：(gx, gy) 或 (0, 0)"""
+    """码的全局边界（任意坐标原点）：(xmin, ymin, xmax, ymax)
+
+    surface code 稳定子坐标从 0 开始 → (0, 0, gx, gy)；
+    color code 坐标从 1.0 开始 → (1.0, 1.0, 2.125, 2.0)。
+    相对边界使穿越判据与码的绝对坐标原点无关（几何论 A1 拓扑判据）。
+    """
     if coords is None:
-        return 0, 0
+        return 0, 0, 0, 0
     all_x = [c[0] for c in coords.values() if len(c) >= 3]
     all_y = [c[1] for c in coords.values() if len(c) >= 3]
-    return (max(all_x) if all_x else 0, max(all_y) if all_y else 0)
+    if not all_x:
+        return 0, 0, 0, 0
+    return min(all_x), min(all_y), max(all_x), max(all_y)
 
 
 def analyze_error_structure(dets, coords, le):
@@ -114,7 +142,7 @@ def analyze_error_structure(dets, coords, le):
     """
     n = len(dets)
     exc_counts = dets.sum(axis=1)
-    gx, gy = _global_extent(coords)
+    x0, y0, gx, gy = _global_extent(coords)
     per_sample = []
     for s in range(n):
         exc_idx = np.where(dets[s])[0]
@@ -148,15 +176,15 @@ def analyze_error_structure(dets, coords, le):
                         min_pair = dist
                     if dist > diam:
                         diam = dist
-        # 边界距离（激发点到码边界的最小距离）
-        max_x = max(p[0] for p in pts)
-        max_y = max(p[1] for p in pts)
-        bdry = min(min(x, max_x - x, y, max_y - y) for x, y, _ in pts)
+        # 边界距离（激发点到码边界的最小距离，相对坐标）
+        bdry = min(min(x - x0, gx - x, y - y0, gy - y) for x, y, _ in pts)
         # 穿越判据（A1 拓扑本质：错误链同时接触相对边界）
         xs_all = [p[0] for p in pts]
         ys_all = [p[1] for p in pts]
-        cross = int((min(xs_all) <= 0 and max(xs_all) >= gx) or
-                    (min(ys_all) <= 0 and max(ys_all) >= gy))
+        width_x = (gx - x0) if gx > x0 else 0.0
+        width_y = (gy - y0) if gy > y0 else 0.0
+        cross = int((max(xs_all) - min(xs_all) >= width_x - 1e-6) or
+                    (max(ys_all) - min(ys_all) >= width_y - 1e-6))
         # 每层最大簇
         max_cluster = 0
         for t, ps in layers.items():
@@ -195,22 +223,22 @@ def analyze_edges(dets, matching, coords, le):
     """
     n = len(dets)
     nd = matching.num_detectors
-    gx, gy = _global_extent(coords)
+    x0, y0, gx, gy = _global_extent(coords)
 
     def edge_dist(e):
         a, b = int(e[0]), int(e[1])
         if a >= nd and b >= nd:
             return 0.0
-        if a >= nd:  # 边界-探测器：探测器到最近边界的距离
+        if a >= nd:  # 边界-探测器：探测器到最近边界的距离（相对坐标）
             c = coords.get(b)
             if c is None or len(c) < 3:
                 return 0.0
-            return min(c[0], gx - c[0], c[1], gy - c[1])
+            return min(c[0] - x0, gx - c[0], c[1] - y0, gy - c[1])
         if b >= nd:
             c = coords.get(a)
             if c is None or len(c) < 3:
                 return 0.0
-            return min(c[0], gx - c[0], c[1], gy - c[1])
+            return min(c[0] - x0, gx - c[0], c[1] - y0, gy - c[1])
         ca, cb = coords.get(a), coords.get(b)
         if ca is None or cb is None or len(ca) < 3 or len(cb) < 3:
             return 0.0
@@ -270,7 +298,7 @@ def edge_maxdist_distribution(matching, dets, coords, le):
     返回 dict(ok=[maxd...], err=[maxd...], n_ok, n_err)
     """
     nd = matching.num_detectors
-    gx, gy = _global_extent(coords)
+    x0, y0, gx, gy = _global_extent(coords)
 
     def edge_dist(e):
         a, b = int(e[0]), int(e[1])
@@ -280,12 +308,12 @@ def edge_maxdist_distribution(matching, dets, coords, le):
             c = coords.get(b)
             if c is None or len(c) < 3:
                 return 0.0
-            return min(c[0], gx - c[0], c[1], gy - c[1])
+            return min(c[0] - x0, gx - c[0], c[1] - y0, gy - c[1])
         if b >= nd:
             c = coords.get(a)
             if c is None or len(c) < 3:
                 return 0.0
-            return min(c[0], gx - c[0], c[1], gy - c[1])
+            return min(c[0] - x0, gx - c[0], c[1] - y0, gy - c[1])
         ca, cb = coords.get(a), coords.get(b)
         if ca is None or cb is None or len(ca) < 3 or len(cb) < 3:
             return 0.0
@@ -313,13 +341,15 @@ def _ratio_line(field, ok, err, threshold=1.5):
     return dict(field=field, ratio=float(ratio), direction=arrow, verdict=verdict)
 
 
-def run_error_geometry(L=4, rounds=3, noise=0.03, shots=20000, with_edges=True):
-    """一键入口：surface code 错误模式几何分析（10.54 复现）
+def diagnose_circuit(circuit, shots, with_edges=True, seed=None):
+    """电路无关的诊断入口：任意 stim 电路 → A0/A1 几何分析（10.54 方法）
 
-    返回 dict：pL, structure(A0/A1 激发层特征), edges(配对边特征),
-               ratios(区分度判定), cross_lift(穿越率提升)
+    surface code / color code 通用。输入任意 stim.Circuit（带探测器坐标），
+    输出与 run_error_geometry 相同的诊断结构。返回 dict：
+    pL, structure(A0/A1 激发层特征), edges(配对边特征), ratios(区分度判定),
+    cross_lift(穿越率提升), n_det, n_qubits。
     """
-    res = decode_surface(L, rounds, noise, shots)
+    res = decode_circuit(circuit, shots, seed=seed)
     st = analyze_error_structure(res["dets"], res["coords"], res["le"])
     out = dict(pL=float(res["le"].mean()), structure=st, edges=None,
                ratios=[], cross_lift=None, n_det=res["n_det"],
@@ -349,3 +379,9 @@ def run_error_geometry(L=4, rounds=3, noise=0.03, shots=20000, with_edges=True):
                                       direction="↑" if ls1 > ls0 else "↓",
                                       verdict="有区分度" if ls1 / ls0 > 1.5 or ls1 / ls0 < 0.67 else "无区分度"))
     return out
+
+
+def run_error_geometry(L=4, rounds=3, noise=0.03, shots=20000, with_edges=True, seed=None):
+    """surface code 便捷入口：错误模式几何分析（10.54 复现）"""
+    circuit = build_surface_circuit(L, rounds, noise)
+    return diagnose_circuit(circuit, shots, with_edges=with_edges, seed=seed)
