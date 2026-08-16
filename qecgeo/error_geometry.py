@@ -18,7 +18,6 @@ cross 穿越率 A1 远高于 A0 —— 配对层是 A0/A1 分类的最强区分�
 """
 import numpy as np
 from collections import defaultdict
-from scipy.spatial.distance import pdist
 
 # ---------- 1. 电路生成 + 解码 ----------
 
@@ -123,23 +122,14 @@ def decode_circuit(circuit, shots, seed=None, decoder='pymatching'):
 # ---------- 2. 错误模式空间结构分析 ----------
 
 def _cluster_sizes(ps):
-    """ps: [(x,y),...] 或 (k,2) 数组 → 连通分量大小列表（曼哈顿距离 ≤ 2 连通）
+    """ps: [(x,y),...] → 连通分量大小列表（曼哈顿距离 ≤ 2 连通）
 
     注：单比特错误产生相邻稳定子激发对，稳定子坐标曼哈顿距离 = 2
     （第一版 min_pair_med=2.0 的观测证实），故邻域半径取 2。
-    numpy 邻接矩阵 + 并查集（union 只对邻接对做）。k 为每层激发点数（典型
-    几十），Python 并查集开销远小于 scipy.sparse 的 csr_matrix 构造开销。
     """
-    arr = np.asarray(ps, dtype=np.int64)
-    n = arr.shape[0]
-    if n == 0:
+    if not ps:
         return []
-    if n == 1:
-        return [1]
-    dx = np.abs(arr[:, 0, None] - arr[None, :, 0])
-    dy = np.abs(arr[:, 1, None] - arr[None, :, 1])
-    adj = (dx + dy) <= 2
-    np.fill_diagonal(adj, False)
+    n = len(ps)
     parent = list(range(n))
 
     def find(i):
@@ -148,11 +138,15 @@ def _cluster_sizes(ps):
             i = parent[i]
         return i
 
-    ii, jj = np.nonzero(np.triu(adj, 1))
-    for a, b in zip(ii.tolist(), jj.tolist()):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
+    def union(i, j):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if abs(ps[i][0] - ps[j][0]) + abs(ps[i][1] - ps[j][1]) <= 2:
+                union(i, j)
     cnt = defaultdict(int)
     for i in range(n):
         cnt[find(i)] += 1
@@ -175,72 +169,53 @@ def _global_extent(coords):
     return min(all_x), min(all_y), max(all_x), max(all_y)
 
 
-def _precompute_coords(coords, n_det):
-    """coords dict {det_idx: [x,y,t]} → (n_det, 3) int64 数组，缺失坐标标记 -1。
-
-    将 per-sample 的 dict 查询 + int() 转换预处理成数组索引（向量化关键步骤）。
-    坐标非负（surface 从 0、color 从 1 起始），-1 标记安全。
-    """
-    arr = np.full((n_det, 3), -1, dtype=np.int64)
-    for d, c in coords.items():
+def _analyze_one(dets, coords, exc_counts, x0, y0, gx, gy, s):
+    """单个样本的激发层特征（模块级，供 fork 多进程复用）"""
+    exc_idx = np.where(dets[s])[0]
+    base = dict(exc=int(exc_counts[s]), min_pair=None, n_layers=None,
+                diam=None, bdry=None, cluster=None, cross=None)
+    if coords is None or len(exc_idx) == 0:
+        return base
+    # 每激发点 (x, y, t)
+    pts = []
+    for d in exc_idx:
+        c = coords.get(d)
         if c is None or len(c) < 3:
             continue
-        if 0 <= d < n_det:
-            arr[d, 0] = int(c[0])
-            arr[d, 1] = int(c[1])
-            arr[d, 2] = int(c[2])
-    return arr
-
-
-def _layer_stats(ps):
-    """单层激发点 (k,2) 数组 → (min_pair, diam)
-
-    min_pair = 最小成对曼哈顿距离（i<j，含 0，与原双层循环一致）；
-    diam = 最大成对曼哈顿距离。scipy pdist（C 实现，cityblock=曼哈顿）。
-    k < 2 时返回 (None, 0)。
-    """
-    if len(ps) < 2:
-        return None, 0
-    arr = np.asarray(ps, dtype=np.int64)
-    d = pdist(arr, metric='cityblock')
-    return int(d.min()), int(d.max())
-
-
-def _analyze_sample(exc_idx, coord_arr, exc_count, x0, y0, gx, gy, width_x, width_y):
-    """单样本激发层特征（向量化，模块级函数以支持多进程 pickle）"""
-    base = dict(exc=int(exc_count), min_pair=None, n_layers=None,
-                diam=None, bdry=None, cluster=None, cross=None)
-    if coord_arr is None or len(exc_idx) == 0:
+        pts.append((int(c[0]), int(c[1]), int(c[2])))
+    if not pts:
         return base
-    pts = coord_arr[exc_idx]
-    pts = pts[pts[:, 0] >= 0]  # 过滤缺失坐标（-1 标记）
-    if len(pts) == 0:
-        return base
+    # 按时间层分组
+    layers = defaultdict(list)
+    for x, y, t in pts:
+        layers[t].append((x, y))
+    # 最近激发对（同层内平面曼哈顿距离）
     min_pair = None
     diam = 0.0
-    n_layers = 0
+    for t, ps in layers.items():
+        for i in range(len(ps)):
+            for j in range(i + 1, len(ps)):
+                dist = abs(ps[i][0] - ps[j][0]) + abs(ps[i][1] - ps[j][1])
+                if min_pair is None or dist < min_pair:
+                    min_pair = dist
+                if dist > diam:
+                    diam = dist
+    # 边界距离（激发点到码边界的最小距离，相对坐标）
+    bdry = min(min(x - x0, gx - x, y - y0, gy - y) for x, y, _ in pts)
+    # 穿越判据（A1 拓扑本质：错误链同时接触相对边界）
+    xs_all = [p[0] for p in pts]
+    ys_all = [p[1] for p in pts]
+    width_x = (gx - x0) if gx > x0 else 0.0
+    width_y = (gy - y0) if gy > y0 else 0.0
+    cross = int((max(xs_all) - min(xs_all) >= width_x - 1e-6) or
+                (max(ys_all) - min(ys_all) >= width_y - 1e-6))
+    # 每层最大簇
     max_cluster = 0
-    for t in np.unique(pts[:, 2]):
-        n_layers += 1
-        lp = pts[pts[:, 2] == t, :2]
-        dmin, dmax = _layer_stats(lp)
-        if dmin is not None and (min_pair is None or dmin < min_pair):
-            min_pair = dmin
-        if dmax > diam:
-            diam = dmax
-        sizes = _cluster_sizes(lp)
+    for t, ps in layers.items():
+        sizes = _cluster_sizes(ps)
         if sizes:
-            m = max(sizes)
-            if m > max_cluster:
-                max_cluster = m
-    xs = pts[:, 0]
-    ys = pts[:, 1]
-    bdry = min(int(xs.min()) - x0, gx - int(xs.max()),
-               int(ys.min()) - y0, gy - int(ys.max()))
-    xspan = int(xs.max()) - int(xs.min())
-    yspan = int(ys.max()) - int(ys.min())
-    cross = int((xspan >= width_x - 1e-6) or (yspan >= width_y - 1e-6))
-    return dict(exc=int(exc_count), min_pair=min_pair, n_layers=n_layers,
+            max_cluster = max(max_cluster, max(sizes))
+    return dict(exc=int(exc_counts[s]), min_pair=min_pair, n_layers=len(layers),
                 diam=diam, bdry=bdry, cluster=max_cluster, cross=cross)
 
 
@@ -253,9 +228,8 @@ def _run_chunk(idx):
     sl = w['slices'][idx]
     out = []
     for s in range(sl.start, sl.stop):
-        out.append(_analyze_sample(np.where(w['dets'][s])[0], w['coord_arr'],
-                                   int(w['exc'][s]), w['x0'], w['y0'], w['gx'], w['gy'],
-                                   w['width_x'], w['width_y']))
+        out.append(_analyze_one(w['dets'], w['coords'], w['exc'],
+                                w['x0'], w['y0'], w['gx'], w['gy'], s))
     return out
 
 
@@ -263,37 +237,31 @@ def analyze_error_structure(dets, coords, le, n_jobs=1):
     """错误模式空间结构分析（几何论 A0/A1 视角）
 
     返回 dict(ok=汇总A0, err=汇总A1)，每侧含 med/q90 统计 + cross_rate
-    n_jobs：并行 worker 数（>1 启用多进程按 shots 分块；数值结果与串行一致）。
+    n_jobs：并行 worker 数（>1 启用 fork 多进程按 shots 分块；数值结果与串行一致）。
     """
     n = len(dets)
     exc_counts = dets.sum(axis=1)
     x0, y0, gx, gy = _global_extent(coords)
-    coord_arr = _precompute_coords(coords, dets.shape[1]) if coords is not None else None
-    width_x = (gx - x0) if gx > x0 else 0.0
-    width_y = (gy - y0) if gy > y0 else 0.0
 
-    if n_jobs > 1 and coord_arr is not None and n > 1:
+    if n_jobs > 1 and n > 1:
         import math
         import multiprocessing as mp
         n_jobs = min(n_jobs, n)
         chunk = int(math.ceil(n / n_jobs))
         slices = [slice(i * chunk, min((i + 1) * chunk, n)) for i in range(n_jobs)]
         slices = [s for s in slices if s.start < s.stop]
-        _WORK.update(dets=dets, coord_arr=coord_arr, exc=exc_counts,
-                     x0=x0, y0=y0, gx=gx, gy=gy,
-                     width_x=width_x, width_y=width_y, slices=slices)
+        _WORK.update(dets=dets, coords=coords, exc=exc_counts,
+                     x0=x0, y0=y0, gx=gx, gy=gy, slices=slices)
         ctx = mp.get_context('fork')
         with ctx.Pool(len(slices)) as pool:
             per_sample = []
             for part in pool.map(_run_chunk, range(len(slices))):
                 per_sample.extend(part)
     else:
-        per_sample = []
-        for s in range(n):
-            per_sample.append(_analyze_sample(np.where(dets[s])[0], coord_arr,
-                                              int(exc_counts[s]),
-                                              x0, y0, gx, gy, width_x, width_y))
+        per_sample = [_analyze_one(dets, coords, exc_counts, x0, y0, gx, gy, s)
+                      for s in range(n)]
 
+    # 汇总（按逻辑错误分组）
     grp_ok, grp_err = [], []
     for s in range(n):
         (grp_err if le[s] else grp_ok).append(per_sample[s])
