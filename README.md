@@ -111,6 +111,9 @@ samples have zero excitations, so A0 median chain lengths are 0 and ratios
 diverge. The crossing lift (a rate, not a median) is unaffected and is the
 robust cross-code comparator.
 
+**Theoretical grounding**: full write-up and tri-sector
+prediction in article 10.55 of the conjugate-spectral-geometry library (CN).
+
 ### 2. Fault-tolerance threshold: closed form
 
 For single-round optimal decoding with depolarizing noise, the logical error
