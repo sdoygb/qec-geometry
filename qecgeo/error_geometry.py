@@ -14,7 +14,7 @@
 已知结果（10.54，surface code L=4）：配对层 total_dist A1/A0 ≈ 3.00×，
 cross 穿越率 A1 远高于 A0 —— 配对层是 A0/A1 分类的最强区分层。
 
-依赖：stim + pymatching（可选，仅 surface code 演示需要）。
+依赖：stim + pymatching（可选，仅 surface code 演示需要）；chromobius（可选，仅 color code 解码需要）。
 """
 import numpy as np
 from collections import defaultdict
@@ -64,25 +64,55 @@ def decode_surface(L, rounds, noise, shots, seed=None):
                 dt=time.time() - t0)
 
 
-def decode_circuit(circuit, shots, seed=None):
-    """任意 stim 电路解码全流程：电路 → DEM → 采样 → MWPM 解码 → 逻辑错误标记
+def _pack_lsb(dets):
+    """unpacked (shots, n_det) uint8 → LSB-first bit-packed (shots, ceil(n/8))
+
+    stim 的 bit_packed 约定（bit i → byte i//8 的 bit i%8），与 chromobius
+    predict_obs_flips_from_dets_bit_packed 的输入格式一致（已验证）。
+    """
+    n = dets.shape[1]
+    nb = (n + 7) // 8
+    bp = np.zeros((dets.shape[0], nb), dtype=np.uint8)
+    for b in range(nb):
+        col = dets[:, b * 8:(b + 1) * 8].astype(np.uint8)
+        w = (1 << np.arange(min(8, n - b * 8))).astype(np.uint8)
+        bp[:, b] = (col * w).sum(axis=1).astype(np.uint8)
+    return bp
+
+
+def decode_circuit(circuit, shots, seed=None, decoder='pymatching'):
+    """任意 stim 电路解码全流程：电路 → DEM → 采样 → 解码 → 逻辑错误标记
 
     与 decode_surface 相同，但接受任意 stim.Circuit（surface code / color code
-    / 任意 stabilizer 电路），电路生成与解码解耦。返回字段同 decode_surface。
+    / 任意 stabilizer 电路），电路生成与解码解耦。decoder 可选：
+      - 'pymatching'：MWPM（surface code 最优；对三色码 d≥7 结构性失效，
+        匹配图含无边界连通分量，奇校验样本无法配对）
+      - 'chromobius'：彩色匹配（color code 专用；无配对边输出 → matching=None，
+        配对层特征（total_dist 等）不可用，激发层特征不受影响）
+    返回字段同 decode_surface（chromobius 时 matching=None，加 decoder 字段）。
     """
-    import pymatching
     import time
     t0 = time.time()
     dem = circuit.detector_error_model(decompose_errors=False)
-    matching = pymatching.Matching.from_detector_error_model(dem)
     sampler = circuit.compile_detector_sampler(seed=seed)
     dets, obs = sampler.sample(shots, separate_observables=True)
-    preds = matching.decode_batch(dets)
-    le = np.any(preds != obs, axis=1)
+    if decoder == 'chromobius':
+        import chromobius
+        dec = chromobius.compile_decoder_for_dem(dem)
+        preds = dec.predict_obs_flips_from_dets_bit_packed(_pack_lsb(dets))
+        # preds 是 bit-packed（观测数 → ceil(n_obs/8) 字节），obs 是 unpacked；
+        # 统一打包后比较（bit i = 观测 i 是否翻转）
+        le = np.any(preds != _pack_lsb(obs), axis=1)
+        matching = None
+    else:
+        import pymatching
+        matching = pymatching.Matching.from_detector_error_model(dem)
+        preds = matching.decode_batch(dets)
+        le = np.any(preds != obs, axis=1)
     coords = get_detector_coords(circuit)
     return dict(circuit=circuit, dets=dets, obs=obs, preds=preds, le=le,
                 coords=coords, matching=matching, n_det=dets.shape[1],
-                dt=time.time() - t0)
+                decoder=decoder, dt=time.time() - t0)
 
 
 # ---------- 2. 错误模式空间结构分析 ----------
@@ -214,15 +244,21 @@ def analyze_error_structure(dets, coords, le):
     return dict(ok=summ(grp_ok), err=summ(grp_err))
 
 
-def analyze_edges(dets, matching, coords, le):
+def analyze_edges(dets, matching, coords, le, max_ok_samples=None):
     """MWPM 配对边纯链分析（A1 非平凡拓扑链应在配对层显现）
 
     decode_to_edges_array 返回配对节点对（无权重列）→ 用 detector 坐标
     计算每条配对边的空间距离作为链长代理。A1 逻辑链跨越整个码 →
     应有更长距离的配对边、更多边界连接。
+
+    容错：三色码（d>=7）的无边界连通分量上 MWPM 无法配对（奇校验）时
+    捕获 ValueError，该样本标记 unpaired 并单独计数，不污染配对统计。
+    max_ok_samples：A0 侧抽样上限（大样本时 A0 中位数统计无需全量）。
     """
     n = len(dets)
     nd = matching.num_detectors
+    # 色码格坐标：x 方向 0.125/0.875 交替（六边形格内色分裂），映射为整数格
+    coords = {k: (round(v[0]), round(v[1]), *v[2:]) for k, v in coords.items()}
     x0, y0, gx, gy = _global_extent(coords)
 
     def edge_dist(e):
@@ -244,12 +280,25 @@ def analyze_edges(dets, matching, coords, le):
             return 0.0
         return abs(ca[0] - cb[0]) + abs(ca[1] - cb[1])  # 空间曼哈顿距离
 
-    per = []
+    per = [None] * n
+    n_unpaired = 0
+    n_ok_done = 0
     for s in range(n):
-        edges = matching.decode_to_edges_array(dets[s])
+        if not le[s] and max_ok_samples is not None and n_ok_done >= max_ok_samples:
+            continue  # A0 抽样：跳过后续 A0 样本
+        try:
+            edges = matching.decode_to_edges_array(dets[s])
+        except ValueError:
+            # 无边界连通分量奇校验：MWPM 不适用（chromobius 可解）
+            n_unpaired += 1
+            per[s] = dict(n_edges=-1, bdry_edges=-1, total_dist=-1.0, max_dist=-1.0,
+                          long_straight=None, long_rate=0.0, unpaired=True)
+            continue
+        if not le[s]:
+            n_ok_done += 1
         if len(edges) == 0:
-            per.append(dict(n_edges=0, bdry_edges=0, total_dist=0.0, max_dist=0.0,
-                            long_straight=None, long_rate=0.0))
+            per[s] = dict(n_edges=0, bdry_edges=0, total_dist=0.0, max_dist=0.0,
+                          long_straight=None, long_rate=0.0)
             continue
         bdry = int(np.sum((edges[:, 0] >= nd) | (edges[:, 1] >= nd)))
         dists = [edge_dist(e) for e in edges]
@@ -269,26 +318,29 @@ def analyze_edges(dets, matching, coords, le):
                 best_dist = d
                 best = (d, abs(ca[0] - cb[0]), abs(ca[1] - cb[1]))
         straight = (max(best[1], best[2]) / best[0]) if best is not None and best[0] > 0 else None
-        per.append(dict(n_edges=int(len(edges)), bdry_edges=bdry,
-                        total_dist=float(sum(dists)), max_dist=mx,
-                        long_straight=straight, long_rate=float(mx >= 4.0)))
+        per[s] = dict(n_edges=int(len(edges)), bdry_edges=bdry,
+                      total_dist=float(sum(dists)), max_dist=mx,
+                      long_straight=straight, long_rate=float(mx >= 4.0))
     grp_ok, grp_err = [], []
     for s in range(n):
+        if per[s] is None:
+            continue  # A0 抽样跳过的样本
         (grp_err if le[s] else grp_ok).append(per[s])
 
     def summ(grp):
-        if not grp:
+        valid = [g for g in grp if g.get("total_dist", -1.0) >= 0.0]
+        if not valid:
             return {}
         f = {}
         for field in ("n_edges", "bdry_edges", "total_dist", "max_dist", "long_rate"):
-            v = [g[field] for g in grp]
+            v = [g[field] for g in valid]
             f[field + "_med"] = float(np.median(v))
             f[field + "_q90"] = float(np.percentile(v, 90))
-        ls = [g["long_straight"] for g in grp if g["long_straight"] is not None]
+        ls = [g["long_straight"] for g in valid if g["long_straight"] is not None]
         f["long_straight_med"] = float(np.median(ls)) if ls else None
-        return dict(n=len(grp), **f)
+        return dict(n=len(valid), **f)
 
-    return dict(ok=summ(grp_ok), err=summ(grp_err))
+    return dict(ok=summ(grp_ok), err=summ(grp_err), unpaired=n_unpaired)
 
 
 def edge_maxdist_distribution(matching, dets, coords, le):
@@ -298,6 +350,7 @@ def edge_maxdist_distribution(matching, dets, coords, le):
     返回 dict(ok=[maxd...], err=[maxd...], n_ok, n_err)
     """
     nd = matching.num_detectors
+    coords = {k: (round(v[0]), round(v[1]), *v[2:]) for k, v in coords.items()}
     x0, y0, gx, gy = _global_extent(coords)
 
     def edge_dist(e):
@@ -341,19 +394,23 @@ def _ratio_line(field, ok, err, threshold=1.5):
     return dict(field=field, ratio=float(ratio), direction=arrow, verdict=verdict)
 
 
-def diagnose_circuit(circuit, shots, with_edges=True, seed=None):
+def diagnose_circuit(circuit, shots, with_edges=True, seed=None, decoder='pymatching'):
     """电路无关的诊断入口：任意 stim 电路 → A0/A1 几何分析（10.54 方法）
 
     surface code / color code 通用。输入任意 stim.Circuit（带探测器坐标），
-    输出与 run_error_geometry 相同的诊断结构。返回 dict：
-    pL, structure(A0/A1 激发层特征), edges(配对边特征), ratios(区分度判定),
-    cross_lift(穿越率提升), n_det, n_qubits。
+    输出与 run_error_geometry 相同的诊断结构。decoder：
+      - 'pymatching'：MWPM 配对（surface code；with_edges=True 报告配对层）
+      - 'chromobius'：色码专用彩色匹配（无配对边 → with_edges 自动关闭，
+        只报告激发层特征；色码必须用它，见 analyze_edges 注释）
+    返回 dict：pL, structure(A0/A1 激发层特征), edges(配对边特征, chromobius
+    时为 None), ratios(区分度判定), cross_lift(穿越率提升), n_det, n_qubits,
+    decoder。
     """
-    res = decode_circuit(circuit, shots, seed=seed)
+    res = decode_circuit(circuit, shots, seed=seed, decoder=decoder)
     st = analyze_error_structure(res["dets"], res["coords"], res["le"])
     out = dict(pL=float(res["le"].mean()), structure=st, edges=None,
                ratios=[], cross_lift=None, n_det=res["n_det"],
-               n_qubits=res["circuit"].num_qubits)
+               n_qubits=res["circuit"].num_qubits, decoder=decoder)
     # 穿越率提升（A1 本质特征）
     c0 = st["ok"].get("cross_rate")
     c1 = st["err"].get("cross_rate")
@@ -364,7 +421,7 @@ def diagnose_circuit(circuit, shots, with_edges=True, seed=None):
         r = _ratio_line(field, st["ok"], st["err"])
         if r is not None:
             out["ratios"].append(r)
-    if with_edges:
+    if with_edges and res["matching"] is not None:
         st2 = analyze_edges(res["dets"], res["matching"], res["coords"], res["le"])
         out["edges"] = st2
         for field in ("n_edges", "bdry_edges", "total_dist", "max_dist", "long_rate"):

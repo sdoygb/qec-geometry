@@ -70,7 +70,7 @@ Two further consequences:
 
 `qecgeo` diagnostics are **circuit-agnostic**: `diagnose_circuit(circuit, ...)`
 accepts any stim circuit with detector coordinates, so the same A0/A1 pipeline
-runs on structurally different codes. Benchmark (8,000 shots/seed 42, via
+runs on structurally different codes. Benchmark (surface 8,000 shots / color 120,000 shots, seed 42, via
 `scripts/benchmark_scan.py`):
 
 **Surface code** (L = 4, rounds = 3):
@@ -82,14 +82,14 @@ runs on structurally different codes. Benchmark (8,000 shots/seed 42, via
 | 0.020 | 24.5% | 1.07× | 1.00× | 1.20× |
 | 0.030 | 38.1% | 1.02× | 1.00× | 1.14× |
 
-**Color code** (diameter = 3, rounds = 3, via chromobius/clorco):
+**Color code** (diameter = 3, rounds = 3, 120,000 shots; decoder: **chromobius** — the color-code-specific color-matching decoder; MWPM is structurally inapplicable to the three-color structure, its matching graph has boundary-free components for d ≥ 7):
 
 | noise | p_L | crossing lift (A1/A0) | cluster lift |
 |---|---|---|---|
-| 0.005 | 3.31% | **3.82×** | 4.00× |
-| 0.010 | 6.55% | **3.25×** | 4.00× |
-| 0.020 | 13.8% | **2.67×** | 4.00× |
-| 0.030 | 19.9% | **2.11×** | 2.00× |
+| 0.005 | 0.36% | **2.69×** | 3.00× |
+| 0.010 | 1.44% | **2.44×** | 1.50× |
+| 0.020 | 5.06% | **2.06×** | 1.50× |
+| 0.030 | 10.42% | **1.80×** | 1.50× |
 
 Three robust findings:
 
@@ -97,19 +97,24 @@ Three robust findings:
    noise grows, error patterns randomize and the A0/A1 geometric separation is
    washed out. The topological signature is strongest **below threshold** —
    exactly the regime QEC operates in.
-2. **The color code keeps a strong separation at every noise level**
-   (≥ 2.11× vs surface's collapse to ~1.0× above noise 0.01). The three-color
+2. **The color code keeps a resolvable separation at every noise level**
+   (≥ 1.80× vs surface's collapse to ~1.0× above noise 0.01). The three-color
    (tri-sector) structure constrains A1 chains topologically, making the
-   logical-error geometry more persistent. This is the geometric-theory
-   prediction: richer sector structure ⇒ more robust A0/A1 separation.
-3. **Cluster lift is 4.00× across noise 0.005–0.02 for the color code**: the
-   largest excitation cluster of A1 is consistently 4× larger than A0's — a
-   cleaner separator than the crossing rate on this small code.
+   logical-error geometry more persistent in the high-noise regime. This is the
+   geometric-theory prediction: richer sector structure ⇒ more robust A0/A1
+   separation.
+3. **Cluster lift is strongest at low noise (3.0×) and plateaus at 1.5×**: the
+   largest excitation cluster of A1 is systematically larger than A0's, but
+   cluster separation (1.5–3.0×) is weaker than crossing separation
+   (1.8–2.7×) and both decay together with noise — crossing rate is the
+   cleaner separator.
 
 *Note on `inf` entries in the scan output*: at low noise most color-code A0
-samples have zero excitations, so A0 median chain lengths are 0 and ratios
-diverge. The crossing lift (a rate, not a median) is unaffected and is the
-robust cross-code comparator.
+samples have zero excitations, so A0 median chain-length features are 0 and
+ratios diverge. Crossing rate and cluster size (rate / median, no pairing
+chain needed) are unaffected and are the robust cross-code comparators. With
+chromobius decoding there is no MWPM pairing layer, so `total_dist` features
+apply to the surface code only.
 
 **Theoretical grounding**: full write-up and tri-sector
 prediction in article 10.55 of the conjugate-spectral-geometry library (CN).
@@ -146,7 +151,8 @@ type** anyon signature, not Fibonacci.
 
 ```bash
 pip install qec-geometry   # from PyPI (numpy auto-installed)
-pip install stim pymatching  # needed only for the surface-code demo
+pip install stim pymatching   # needed only for the surface-code demo
+pip install chromobius       # needed only for the color-code demo
 ```
 
 ```python
@@ -197,6 +203,10 @@ python3 -m unittest tests.test_qecgeo -v        # 14 tests
   crossing-rate statistics fluctuate at the few-percent level with shot count
   (1.2–2.1× range). The relative separation (A1/A0) decays with L (background
   dilution); the absolute scaling law (A1 − A0 = L) is the robust observable.
+- Color-code numbers above were produced with chromobius (its native decoder):
+  MWPM is structurally inapplicable to the three-color structure (d ≥ 7
+  matching graph has boundary-free components). For color codes always use
+  `decoder='chromobius'`.
 
 ## Theory source
 
