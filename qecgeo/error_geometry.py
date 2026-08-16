@@ -93,11 +93,14 @@ def decode_circuit(circuit, shots, seed=None, decoder='pymatching'):
     """
     import time
     t0 = time.time()
-    dem = circuit.detector_error_model(decompose_errors=False)
     sampler = circuit.compile_detector_sampler(seed=seed)
     dets, obs = sampler.sample(shots, separate_observables=True)
     if decoder == 'chromobius':
         import chromobius
+        # 色码 phenom 的 3-symptom 三角形错误（数据比特被 3 个稳定子包围）是
+        # 码的固有结构，stim 无法分解为图边；chromobius 的 color matching
+        # 直接处理 hyper-edge，故必须 decompose_errors=False
+        dem = circuit.detector_error_model(decompose_errors=False)
         dec = chromobius.compile_decoder_for_dem(dem)
         preds = dec.predict_obs_flips_from_dets_bit_packed(_pack_lsb(dets))
         # preds 是 bit-packed（观测数 → ceil(n_obs/8) 字节），obs 是 unpacked；
@@ -106,6 +109,7 @@ def decode_circuit(circuit, shots, seed=None, decoder='pymatching'):
         matching = None
     else:
         import pymatching
+        dem = circuit.detector_error_model(decompose_errors=False)
         matching = pymatching.Matching.from_detector_error_model(dem)
         preds = matching.decode_batch(dets)
         le = np.any(preds != obs, axis=1)
@@ -410,7 +414,8 @@ def diagnose_circuit(circuit, shots, with_edges=True, seed=None, decoder='pymatc
     st = analyze_error_structure(res["dets"], res["coords"], res["le"])
     out = dict(pL=float(res["le"].mean()), structure=st, edges=None,
                ratios=[], cross_lift=None, n_det=res["n_det"],
-               n_qubits=res["circuit"].num_qubits, decoder=decoder)
+               n_qubits=res["circuit"].num_qubits, decoder=decoder,
+               coords=res["coords"])
     # 穿越率提升（A1 本质特征）
     c0 = st["ok"].get("cross_rate")
     c1 = st["err"].get("cross_rate")
