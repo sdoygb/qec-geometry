@@ -97,8 +97,10 @@ Three robust findings:
    noise grows, error patterns randomize and the A0/A1 geometric separation is
    washed out. The topological signature is strongest **below threshold** —
    exactly the regime QEC operates in.
-2. **The color code keeps a resolvable separation at every noise level**
-   (≥ 1.80× vs surface's collapse to ~1.0× above noise 0.01). The three-color
+2. **The color code (d=3) keeps a resolvable separation at every noise level**
+   (≥ 1.80× vs surface's collapse to ~1.0× above noise 0.01); the separation
+   degrades with code distance (d=5/7/9/11: 1.73/1.27/1.21/0.97 at p=0.03,
+   see 10.55 open question 2). The three-color
    (tri-sector) structure constrains A1 chains topologically, making the
    logical-error geometry more persistent in the high-noise regime. This is the
    geometric-theory prediction: richer sector structure ⇒ more robust A0/A1
