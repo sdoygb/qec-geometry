@@ -2,7 +2,7 @@
 
 **Geometric diagnostics for quantum error correction codes.**
 
-A zero-dependency Python toolkit that classifies decoding error patterns by their
+A lightweight Python toolkit (numpy + scipy only) that classifies decoding error patterns by their
 topology (A0: local / trivial, A1: non-trivial crossing chains) and predicts
 fault-tolerance thresholds from a closed-form formula.
 
@@ -152,7 +152,7 @@ type** anyon signature, not Fibonacci.
 ## Install & use
 
 ```bash
-pip install qec-geometry   # from PyPI (numpy auto-installed)
+pip install qec-geometry   # from PyPI (numpy + scipy auto-installed)
 pip install stim pymatching   # needed only for the surface-code demo
 pip install chromobius       # needed only for the color-code demo
 ```

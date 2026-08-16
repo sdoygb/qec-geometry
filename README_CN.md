@@ -2,7 +2,7 @@
 
 **量子纠错码的几何诊断工具包**
 
-零依赖 Python 工具：按拓扑对解码错误模式分类（A0：局域/平凡拓扑；A1：跨边界非平凡链），
+轻量 Python 工具（仅依赖 numpy + scipy）：按拓扑对解码错误模式分类（A0：局域/平凡拓扑；A1：跨边界非平凡链），
 并用闭式公式预测容错阈值。
 
 ```
@@ -120,7 +120,7 @@ Monte Carlo 在低 p 下确认 p_L ≈ A·p²（p=0.01 时 ratio ≈ 0.87，[7,1
 ## 安装与使用
 
 ```bash
-pip install numpy            # 唯一硬依赖
+pip install numpy scipy      # 硬依赖
 pip install stim pymatching   # 仅 surface code 演示需要
 pip install chromobius       # 仅 color code 演示需要
 ```
