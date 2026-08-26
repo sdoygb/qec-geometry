@@ -190,6 +190,64 @@ python3 -m unittest tests.test_qecgeo -v        # 14 tests
 - All numerical results are stored in `data/` (JSON) and reproduced by the
   scripts above.
 
+### 5. PG complete codes + degeneracy ratios (NEW)
+
+Two families are covered by the closed forms:
+
+| Family | Code | d | Closed form | Reference |
+|---|---|---|---|---|
+| PG | `[[2^m-1, 2^m-1-2m, 3]]` | 3 (locked) | weight-3 logicals `= (2^m-1)(2^m-2)/6` | 10.28 |
+| AG | `[[2^m, n-2·dim RM(r,m), 2^{r+1}]]` | arbitrary | full parameter/loss table | 10.30/10.35 |
+
+Degeneracy ratios (10.33): `P_r(m)` (full-degeneracy proportion, = 1 for r ≤ 2,
+~1e-4 for r=3,m=8) and `P'_r(m)` (next-order, → θ^{d+2} coefficient).
+
+```python
+from qecgeo import pg_params, degeneracy_ratio, degeneracy_ratio_next
+pg_params(4)                       # {'n': 15, 'k': 7, 'd': 3, 'w3_logical': 35}
+degeneracy_ratio(8, 3)             # 1.007e-4
+degeneracy_ratio_next(6, 2)        # 0.08197
+```
+
+Run `scripts/compare_families.py` for the side-by-side PG vs AG comparison.
+
+### 6. Logical-operator counting + cross-family benchmark (NEW)
+
+Logical-operator count closed forms (verified against full enumeration):
+
+```python
+from qecgeo import logical_operator_count, pg_logical_count
+logical_operator_count(5, 1)   # 1240 = AG(5,2) 2-flats  (RM(1,5), verified)
+logical_operator_count(6, 1)   # 10416 = AG(6,2) 2-flats (RM(1,6), verified)
+pg_logical_count(4)            # 35 = PG(3,2) lines
+```
+
+| Family | Logical operators (weight d) | Reference |
+|---|---|---|
+| AG `[[2^m, k, 2^{r+1}]]` | `2^{m-r-1}·[m choose r+1]_2` (AG flats) | Theorem 10.30.2.04 |
+| PG `[[2^m-1, k, 3]]` | `(2^m-1)(2^m-2)/6` (PG lines) | 10.28 |
+
+Run `scripts/cross_family_benchmark.py` for the unified cross-family
+comparison (PG vs AG, parameters + logical counts + loss scaling + degeneracy
+ratios), all from combinatorial closed forms.
+
+### 7. Universal loss exponent + detection-rate closed forms (NEW)
+
+Two closed forms from the noise-behaviour series (10.29/10.31):
+
+```python
+from qecgeo import loss_exponent, detection_rate, miss_conditional_fidelity
+loss_exponent(8)          # 8 = 2·ceil(8/2): loss ~ θ^8 for d=8
+detection_rate(0.1)       # 0.002498 = sin²(0.05)
+miss_conditional_fidelity()  # 1.0 (missed injection is harmless)
+```
+
+| Quantity | Closed form | Reference | Verified |
+|---|---|---|---|
+| Loss exponent | `2·⌈d/2⌉` (universal, PG & AG) | Theorem 10.31.1.05 | d=3 → slope 3.99; d=8 → 7.96 |
+| Detection rate | `sin²(θ/2)` (code-independent) | 10.29 Prop. 2 | dev < 3.8e-16 |
+| Miss-path fidelity | `1` (project back to code space) | 10.29 Prop. 2b | dev < 2.2e-16 |
+
 ## Honest limitations
 
 - The A0/A1 geometric separation is a **sub-threshold phenomenon**: at noise
@@ -210,12 +268,51 @@ python3 -m unittest tests.test_qecgeo -v        # 14 tests
   matching graph has boundary-free components). For color codes always use
   `decoder='chromobius'`.
 
+### 4. AG complete-code closed forms: parameters without circuits (NEW)
+
+`qecgeo.closedform` computes the full error-correction parameter table for the
+AG complete-code family `[[2^m, k, 2^{r+1}]]` **directly from combinatorial
+closed forms** — no circuit generation, no simulation:
+
+```python
+from qecgeo.closedform import ag_params, zero_loss_boundary, loss_at_theta
+
+p = ag_params(10, 3)                      # [[1024, 672, 16]]
+print(p['rate'])                          # encoding rate 0.65625
+print(zero_loss_boundary(p['d']))         # 7 = floor((d-1)/2)
+print(loss_at_theta(p['c_d'], p['d'], 0.01))  # 1.05e-24
+```
+
+| Quantity | Closed form | Reference |
+|---|---|---|
+| Code `[[n,k,d]]` | `[[2^m, n-2·dim RM(r,m), 2^{r+1}]]` | 10.30 |
+| `fail(w0)` | `1 - Pr/(v_r·P(w0)) - Pr1/(v_r1·P(w0))` | Lemma 10.35.2.07 |
+| `κ_r(m)` | `2^{(r+1)(m-r-1)} / [m choose r+1]_2` | Lemma 10.35.2.10 |
+| `loss(θ)` | `c_d·θ^d`, `c_d = C(n,w0)·P(w0)·fail(w0)·κ·2^{-2w0}` | Theorem 10.35.1.07 |
+| Zero-loss boundary | `k_max = ⌊(d-1)/2⌋` | Theorem 10.31.1.01 |
+| Transversal gates | `{Pauli, CNOT, H, phase, logical measurement}` | Prop. 10.30.3.01 |
+
+Run `scripts/closedform_table.py --theta 0.01 --verify` for the full table
+(24 codes, loss spans ~49 orders of magnitude) plus cross-validation:
+[[15,7,3]] exact enumeration (315/945 = 1/3) and threshold p_th = 1/A = 2.86%
+— above the surface-code ~1%.
+
+`scripts/verify_closedform.py` independently verifies the closed-form
+components against exact enumeration on [[16,6,4]] (Pr, Pr1, P(w0) all match;
+zero-loss boundary holds; θ⁴ slope ≈ 4 reproduced on the [[7,1,3]] statevector
+simulation).
+
 ## Theory source
 
 The A0/A1 classification, threshold closed form, and anyon typing derive from
 the Geometric Theory of quantum error correction (Ouyang Guobin):
 
 - Article 10.27 — geometric code construction [[5,1,3]], [[7,1,3]], [[9,1,3]]
+- Article 10.28 — PG complete codes [[2^m-1, 2^m-1-2m, 3]], direction completeness
+- Article 10.30 — AG complete codes [[2^m, k, 2^{r+1}]] construction
+- Article 10.33 — degeneracy-ratio closed forms P_r(m), P'_r(m)
+- Article 10.31 — zero-loss injection theorem (k ≤ ⌊(d-1)/2⌋)
+- Article 10.35 — loss-scaling closed form loss(θ) = c_d·θ^d
 - Article 10.44 — threshold closed form p_th = 1/(η·C(n,2)), Ising anyon typing
 - Article 10.54 — error-pattern geometry: A0/A1 pairing-layer separation
 

@@ -18,5 +18,10 @@ from .threshold import (analyze_eta, monte_carlo, verify_quadratic,
                         concatenation_sequence)
 from .anyon import (delta_phase_analysis, is_ising_statistics,
                     verify_delta8_berry_consistency)
+from .closedform import (ag_params, pg_params, zero_loss_boundary,
+                         loss_at_theta, degeneracy_ratio,
+                         degeneracy_ratio_next, logical_operator_count,
+                         pg_logical_count, loss_exponent, detection_rate,
+                         miss_conditional_fidelity, TRANSVERSAL_GATES)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
