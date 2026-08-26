@@ -227,6 +227,17 @@ pg_logical_count(4)            # 35 = PG(3,2) lines
 | AG `[[2^m, k, 2^{r+1}]]` | `2^{m-r-1}·[m choose r+1]_2` (AG flats) | Theorem 10.30.2.04 |
 | PG `[[2^m-1, k, 3]]` | `(2^m-1)(2^m-2)/6` (PG lines) | 10.28 |
 
+The same functionality is exposed as a class API (matching the
+pyqpanda-algorithm `QECClosedForm` module), for use alongside a simulator:
+
+```python
+from qecgeo import QECClosedForm
+cf = QECClosedForm(10, 3)     # [[1024, 672, 16]]
+cf.code()                     # (1024, 672, 16)
+cf.loss(0.01)                 # 1.05e-24
+cf.zero_loss_boundary()       # 7
+```
+
 Run `scripts/cross_family_benchmark.py` for the unified cross-family
 comparison (PG vs AG, parameters + logical counts + loss scaling + degeneracy
 ratios), all from combinatorial closed forms.

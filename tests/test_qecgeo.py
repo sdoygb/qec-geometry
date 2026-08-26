@@ -122,3 +122,25 @@ class TestAnyon(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestQECClosedFormClass:
+    """QECClosedForm 类 API（与 pyqpanda-algorithm PR #49 同步）。"""
+
+    def test_class_code(self):
+        from qecgeo import QECClosedForm
+        cf = QECClosedForm(10, 3)
+        assert cf.code() == (1024, 672, 16)
+
+    def test_class_loss(self):
+        from qecgeo import QECClosedForm
+        cf = QECClosedForm(4, 1)
+        assert abs(cf.loss(0.01) - 3e-8) < 1e-10
+
+    def test_class_interface_parity(self):
+        """类 API 与函数 API 结果一致。"""
+        from qecgeo import QECClosedForm, ag_params
+        cf = QECClosedForm(6, 2)
+        p = ag_params(6, 2)
+        assert cf.c_d == p["c_d"]
+        assert cf.encoding_rate() == p["rate"]

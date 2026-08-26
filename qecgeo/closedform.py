@@ -215,3 +215,68 @@ def ag_dminus1_syndrome(m, r):
     size = (n - 1) * (n - 2) // 6
     return dict(classes=n, size_per_class=size,
                 pg_lines=size)  # = PG(m−1,2) 线数
+
+
+class QECClosedForm:
+    """AG 完备码族 [[2^m, k, 2^{r+1}]] 闭式纠错参数预测器（类封装 API）。
+
+    与 pyqpanda-algorithm 的 QECClosedForm 模块接口一致（同步维护）：
+    QECNoise（模拟验证 θ⁴）的预测层配套——闭式秒算 loss(θ)=c_d·θ^d。
+
+    示例::
+
+        cf = QECClosedForm(10, 3)          # [[1024, 672, 16]]
+        cf.code()                          # (1024, 672, 16)
+        cf.loss(0.01)                      # 1.05e-24
+    """
+
+    def __init__(self, m, r):
+        self.m = m
+        self.r = r
+        p = ag_params(m, r)
+        if p is None:
+            raise ValueError(f"参数 m={m}, r={r} 给出非正逻辑比特数")
+        self.n, self.k, self.d = p["n"], p["k"], p["d"]
+        self.w0 = p["w0"]
+        self.fail = p["fail"]
+        self.kap = p["kap"]
+        self.c_d = p["c_d"]
+
+    def code(self):
+        """返回码参数 (n, k, d)。"""
+        return self.n, self.k, self.d
+
+    def encoding_rate(self):
+        """编码率 k/n。"""
+        return self.k / self.n
+
+    def zero_loss_boundary(self):
+        """注入零损失边界 k_max = ⌊(d-1)/2⌋（定理 10.31.1.01）。"""
+        return zero_loss_boundary(self.d)
+
+    def loss(self, theta):
+        """逻辑损失闭式 loss(θ) = c_d·θ^d（定理 10.35.1.07）。"""
+        return loss_at_theta(self.c_d, self.d, theta)
+
+    def logical_operator_count(self):
+        """权重 d 逻辑算符数（定理 10.30.2.04）。"""
+        return logical_operator_count(self.m, self.r)
+
+    @staticmethod
+    def detection_rate(theta):
+        """检测率闭式 p_det(θ) = sin²(θ/2)（10.29 预言 2a）。"""
+        return detection_rate(theta)
+
+    def summary(self):
+        """返回一行可读的参数摘要。"""
+        return (f"[[{self.n},{self.k},{self.d}]] rate={self.encoding_rate():.4f} "
+                f"w0={self.w0} fail={self.fail:.4f} κ={self.kap:.4f} "
+                f"c_d={self.c_d:.4g} zero-loss≤{self.zero_loss_boundary()} "
+                f"logicals={self.logical_operator_count()}")
+
+
+__all__ = ["ag_params", "pg_params", "zero_loss_boundary", "loss_at_theta",
+           "degeneracy_ratio", "degeneracy_ratio_next", "logical_operator_count",
+           "pg_logical_count", "loss_exponent", "detection_rate",
+           "miss_conditional_fidelity", "rm1_w2_degeneracy",
+           "ag_dminus1_syndrome", "QECClosedForm"]
