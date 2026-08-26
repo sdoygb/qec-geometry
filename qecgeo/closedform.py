@@ -190,3 +190,28 @@ def miss_conditional_fidelity():
     程序验证偏差 < 2.2e-16。
     """
     return 1.0
+
+
+# ============ 开放问题闭式（10.30 §8 解答）============
+
+def rm1_w2_degeneracy(m):
+    """RM(1,m) 权重 2 简并类闭式（10.30 开放问题 1 解答）。
+
+    类数 = 2^m − 1，每类大小 = 2^{m−1}（m=4..10 全量枚举验证）。
+    类内共享差分向量 a⊕b（平行四边形结构）。守恒: C(2^m,2) = (2^m−1)·2^{m−1}。
+    """
+    return dict(classes=(1 << m) - 1, size_per_class=1 << (m - 1))
+
+
+def ag_dminus1_syndrome(m, r):
+    """AG 完备码权重 d−1 层 syndrome 分布闭式（10.30 开放问题 2 解答）。
+
+    对 r=1（d=4, w=3）：类数 = 2^m，每类大小 = (2^m−1)(2^m−2)/6
+    = PG(m−1,2) 线数 —— 两个完备族的深层对偶（m=4..6 全量枚举验证）。
+    """
+    if r != 1:
+        raise NotImplementedError("r=1 已验证；r≥2 的 d−1 层分布见 m=5,r=2 探索（类大小 84/106/155）")
+    n = 1 << m
+    size = (n - 1) * (n - 2) // 6
+    return dict(classes=n, size_per_class=size,
+                pg_lines=size)  # = PG(m−1,2) 线数

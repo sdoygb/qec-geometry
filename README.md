@@ -248,6 +248,26 @@ miss_conditional_fidelity()  # 1.0 (missed injection is harmless)
 | Detection rate | `sin²(θ/2)` (code-independent) | 10.29 Prop. 2 | dev < 3.8e-16 |
 | Miss-path fidelity | `1` (project back to code space) | 10.29 Prop. 2b | dev < 2.2e-16 |
 
+### 8. Open-problem closed forms: RM(1,m) degeneracy + d−1 layer (NEW)
+
+Answers to two open problems of 10.30 §8, verified by full enumeration:
+
+```python
+from qecgeo import rm1_w2_degeneracy, ag_dminus1_syndrome
+rm1_w2_degeneracy(7)          # 127 classes × 64 pairs each (RM(1,7), verified)
+ag_dminus1_syndrome(6, 1)     # 64 classes × 651 (d−1 layer, = PG(5,2) lines)
+```
+
+**O1 — RM(1,m) weight-2 degeneracy** (10.30 §8 O1): class count = `2^m − 1`,
+size per class = `2^{m−1}`, all classes share a fixed difference vector a⊕b
+(parallelogram). Verified m = 4..10; note the 10.30 text's "63" is a typo for
+`2^5−1 = 31` (confirmed by enumeration and the QEC paper).
+
+**O2 — weight d−1 layer syndrome distribution** (10.30 §8 O2, r=1 case):
+class count = `2^m`, size per class = `(2^m−1)(2^m−2)/6` — exactly the
+PG(m−1,2) line count. A deep duality between the two complete families
+(AG d−1 layer degeneracy = PG logical count). Verified m = 4..6.
+
 ## Honest limitations
 
 - The A0/A1 geometric separation is a **sub-threshold phenomenon**: at noise
