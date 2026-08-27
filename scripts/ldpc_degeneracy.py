@@ -119,3 +119,41 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def minweight_decode_rates(dec, n, wmax=2):
+    """最小权重解码恢复率：对每个权重 w 错误 E，E 是其 syndrome 类中
+    唯一最小权重成员 ⟺ 解码成功。比 fail_rate（类大小指标）更精确：
+    fail_rate 把权重1/权重2共享类的成员都计入 fail，但解码器实际选
+    最小权重成员（权重1错误可正确恢复）。
+
+    返回 {w: 恢复率}。surface [[9,1,3]] 权重2恢复率=1/3（逻辑等价结构）；
+    HGP LDPC 权重2恢复率随码长上升（58.7%→87.7%）。
+    """
+    from collections import defaultdict
+    classes = defaultdict(list)
+    for w in range(1, wmax + 1):
+        for idxs in combinations(range(n), w):
+            for types in product((1, 2, 3), repeat=w):
+                t = [0] * n
+                for idx, ty in zip(idxs, types):
+                    t[idx] = ty
+                E = Pauli(n, t)
+                classes[dec.syndrome_of(E)].append((w, E))
+    out = {}
+    for w in range(1, wmax + 1):
+        total = succ = 0
+        for idxs in combinations(range(n), w):
+            for types in product((1, 2, 3), repeat=w):
+                t = [0] * n
+                for idx, ty in zip(idxs, types):
+                    t[idx] = ty
+                E = Pauli(n, t)
+                members = classes[dec.syndrome_of(E)]
+                wmin = min(m[0] for m in members)
+                min_members = [m for m in members if m[0] == wmin]
+                total += 1
+                if wmin == w and len(min_members) == 1 and min_members[0][1] == E:
+                    succ += 1
+        out[w] = succ / total if total else None
+    return out
