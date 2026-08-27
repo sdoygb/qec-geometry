@@ -159,9 +159,8 @@ def css_rm_x_decode(syndrome, m, r):
 
 
 def css_rm_zsupport(m, r):
-    """CSS(RM(r,m)) 逻辑 Z 支撑 = x1x2 的支撑（权重 4）。
-
-    与 end_to_end_demo 的 css_rm_code 一致。
+    """CSS(RM(r,m)) 逻辑 Z 支撑 = x_1x_2 的支撑（权重 2^{m-2}，非恒 4——
+    m=4 时才是 4；260827 修正注释）。与 end_to_end_demo 的 css_rm_code 一致。
     """
     n = 1 << m
     return [i for i in range(n) if ((i >> (m - 1)) & 1) and ((i >> (m - 2)) & 1)]

@@ -148,8 +148,10 @@ class LookupDecoder:
         Ez = np.array([r[1] for r in rows], dtype=np.int8)
         synd = (Ex @ Sz.T + Ez @ Sx.T) & 1                   # (N, ns)
         # 首次出现（np.unique 返回每个 syndrome 首次出现的行索引）
-        shifts = np.array([1 << i for i in range(ns)], dtype=np.int64)
-        idx = (synd.astype(np.int64) * shifts).sum(axis=1)
+        # 位编码用 Python 大整数（object dtype）——int64 在 ns ≥ 63 时溢出
+        # （1<<63 为负），260827 修复
+        shifts = np.array([1 << i for i in range(ns)], dtype=object)
+        idx = (synd.astype(object) * shifts).sum(axis=1)
         uniq, first_idx = np.unique(idx, return_index=True)
         # 构建表（首次出现行 = 最小权重恢复）
         table = {}

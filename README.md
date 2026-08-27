@@ -391,6 +391,11 @@ recomputed honestly: for n = 1024, p = 0.001 the weight ≤ 4 fast path covers
 91.5% of errors — the high-weight path matters for real noise (42% coverage
 at p = 0.005 with weight ≤ 4 only).
 
+**Performance cliff** (measured 260827): the weight-3/4 fast paths are slow
+at large n — w=3 @ n=1024 ≈ 37 s/decode, w=4 @ n=512 ≈ 179 s, w=4 @ n=1024
+≈ 11.7 min. The decoder is practical when errors ≤ 2 dominate (99.89% at
+p=0.001); single w=3/4 errors at n ≥ 512 stall decode.
+
 ### 12. Degeneracy analysis of mainstream codes: surface & LDPC (NEW)
 
 The geometric-theory degeneracy pipeline (10.30/10.83) applied to **any**

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""ag_stim_sim.py —— AG 完备码 stim 物理噪声模拟（10.84 桥接验证）
+"""[已废弃，勿用] ag_stim_sim.py —— AG 码单轮 stim 电路早期探索版
+
+**废弃原因（260827）**：单轮电路（无参考轮）X 稳定子测量随机
+（数据 |0> 非 X 本征态），解码不可靠。正确版本见
+ag_stim_memory.py（rounds=2 差分 + 稳定子提取 + MILP 兜底）。
+
+历史用途：ag_stim_sim.py —— AG 完备码 stim 物理噪声模拟（10.84 桥接验证）
 
 目标：用 stim 标准流程（depolarizing noise）模拟 AG 完备码 CSS(RM(r,m))，
 得到 p_L vs p 曲线，验证零简并理论在物理噪声下的恢复优势（对照 surface code）。
