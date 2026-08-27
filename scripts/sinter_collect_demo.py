@@ -5,15 +5,14 @@
 - 码 1：CSS(RM(1,4)) [[16,6,4]]（26 qubit 电路，rounds=2 差分，数据 depolarize + 测量翻转）
   - 解码器 A：本库查表解码器（LookupSinterDecoder，sinter.Decoder 接口）
   - 解码器 B：pymatching (MWPM)
-- 码 2：surface code d=3（stim 内置生成器，同一噪声模型）
-  - 解码器 A：本库查表解码器
+- 解码器 A：本库查表解码器（LookupSinterDecoder，sinter.Decoder 接口）
   - 解码器 B：pymatching (MWPM)
 
 输出：data/sinter_benchmark.csv（code, decoder, p_data, p_meas, shots, errors, p_L）
 无任何判断句——纯数据，可复现。
 
 注意：lookup 解码器用 CSS(RM(1,4)) [[16,6,4]] 训练（z/x 探测器索引 + 恢复表
-来自该码）。用于 surface d=3 的 'lookup' 行是【跨码负对照】——把训练于 A 码
+来自该码）。
 的解码器套到 B 码上，非有效基准，仅演示"解码器-码不匹配"行为。
 
 运行: .venv311/bin/python scripts/sinter_collect_demo.py
@@ -53,21 +52,6 @@ def ag_task(p_data, p_meas, shots):
     return task, {"lookup": dec}
 
 
-def surface_task(d, p_data, p_meas):
-    """surface code d 任务（stim 生成器，同一噪声模型）。"""
-    c = stim.Circuit.generated(
-        "surface_code:rotated_memory_z",
-        distance=d, rounds=2,
-        after_clifford_depolarization=0.0,
-        before_round_data_depolarization=p_data,
-        after_reset_flip_probability=p_meas,
-        before_measure_flip_probability=p_meas,
-    )
-    return sinter.Task(
-        circuit=c,
-        json_metadata={"code": f"surface d={d}", "p_data": p_data, "p_meas": p_meas},
-    )
-
 
 def main():
     ps = (0.01, 0.02, 0.03)
@@ -81,8 +65,6 @@ def main():
         task, decs = ag_task(p, p_meas, shots)
         tasks.append(task)
         custom["lookup"] = decs["lookup"]
-    for p in ps:
-        tasks.append(surface_task(3, p, p_meas))
 
     # sinter.collect（标准流程，固定解码器集合）
     stats = sinter.collect(

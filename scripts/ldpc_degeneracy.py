@@ -127,8 +127,7 @@ def minweight_decode_rates(dec, n, wmax=2):
     fail_rate 把权重1/权重2共享类的成员都计入 fail，但解码器实际选
     最小权重成员（权重1错误可正确恢复）。
 
-    返回 {w: 恢复率}。surface [[9,1,3]] 权重2恢复率=1/3（逻辑等价结构）；
-    HGP LDPC 权重2恢复率随码长上升（58.7%→87.7%）。
+    返回 {w: 恢复率}。HGP LDPC 权重2恢复率随码长上升（58.7%→87.7%）。
     """
     from collections import defaultdict
     classes = defaultdict(list)

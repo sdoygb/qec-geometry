@@ -22,11 +22,7 @@ stim 多轮电路（rounds=2 参考轮 + 差分探测器）基础设施：
   rounds=2 差分，这是 stim 标准模式
 
 同条件对照（stim 多轮 + 测量噪声 p_meas=0.01，rounds=2）：
-  AG(4,1) 查表 vs surface d=3 MWPM：
-  p=0.01: 0.00370 vs 0.01210（AG 低 3.3×）
-  p=0.02: 0.01100 vs 0.02510（AG 低 2.3×）
-  p=0.03: 0.01990 vs 0.03280（AG 低 1.6×）
-  —— AG(4,1) 简单查表（零简并）胜过 surface MWPM（工业标准）
+  AG(4,1) 查表 vs AG(4,1)+pymatching（AG 内部对比）
 
 运行: .venv311/bin/python scripts/ag_stim_memory.py
 """
