@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""sinter_collect_demo.py —— sinter.collect 集成：AG 零简并查表 vs surface MWPM
+"""sinter_collect_demo.py —— sinter.collect：自定义解码器 vs pymatching 对照
 
-用 sinter 生态的标准流程（sinter.collect）跑同条件对比：
-- AG(4,1) [[16,6,4]]：自定义解码器 LookupSinterDecoder（几何论查表，零简并）
-- surface d=3：pymatching（工业标准 MWPM）
-- 同一噪声模型：rounds=2 差分 + 数据 depolarize + 测量翻转（before_measure）
-- 输出：各噪声下的 p_L 曲线
+可复现对照实验（sinter 标准流程）：
+- 码 1：CSS(RM(1,4)) [[16,6,4]]（26 qubit 电路，rounds=2 差分，数据 depolarize + 测量翻转）
+  - 解码器 A：本库查表解码器（LookupSinterDecoder，sinter.Decoder 接口）
+  - 解码器 B：pymatching (MWPM)
+- 码 2：surface code d=3（stim 内置生成器，同一噪声模型）
+  - 解码器 A：本库查表解码器
+  - 解码器 B：pymatching (MWPM)
 
-这证明几何论解码器可通过 sinter.Decoder 接口无缝融入 stim 生态
-（含 tqec 若其基于 sinter）。
+输出：data/sinter_benchmark.csv（code, decoder, p_data, p_meas, shots, errors, p_L）
+无任何判断句——纯数据，可复现。
 
 运行: .venv311/bin/python scripts/sinter_collect_demo.py
 """
+import csv
 import os
+import pathlib
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,9 +28,11 @@ import stim
 from scripts.ag_stim_memory import build_rounds2, extract_stabilizers
 from scripts.sinter_lookup_decoder import LookupSinterDecoder
 
+DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
-def ag_tasks(p_data, p_meas, shots):
-    """AG(4,1) sinter 任务：自定义解码器 'lookup'。"""
+
+def ag_task(p_data, p_meas, shots):
+    """CSS(RM(1,4)) [[16,6,4]] 任务 + 查表解码器（sinter.Decoder 接口）。"""
     m, r = 4, 1
     n = 1 << m
     c, _ = build_rounds2(m, r, p_data, p_meas)
@@ -36,59 +42,72 @@ def ag_tasks(p_data, p_meas, shots):
     dec = LookupSinterDecoder(dec_z=dec_z, dec_x=dec_x,
                               z_det_indices=list(z_dets), x_det_indices=list(x_dets),
                               obs_map_z=[lz], obs_map_x=[[]])
-    return sinter.Task(
+    task = sinter.Task(
         circuit=c,
-        json_metadata={'code': 'AG(4,1)', 'p_data': p_data, 'p_meas': p_meas},
-    ), {'lookup': dec}
+        json_metadata={"code": "CSS(RM(1,4)) [[16,6,4]]", "p_data": p_data, "p_meas": p_meas},
+    )
+    return task, {"lookup": dec}
 
 
-def surface_task(d, p_data, p_meas, shots):
-    """surface d=3 sinter 任务：pymatching 解码器。"""
-    c = stim.Circuit.generated('surface_code:rotated_memory_z',
+def surface_task(d, p_data, p_meas):
+    """surface code d 任务（stim 生成器，同一噪声模型）。"""
+    c = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
         distance=d, rounds=2,
         after_clifford_depolarization=0.0,
         before_round_data_depolarization=p_data,
         after_reset_flip_probability=p_meas,
-        before_measure_flip_probability=p_meas)
+        before_measure_flip_probability=p_meas,
+    )
     return sinter.Task(
         circuit=c,
-        json_metadata={'code': f'surface d={d}', 'p_data': p_data, 'p_meas': p_meas},
+        json_metadata={"code": f"surface d={d}", "p_data": p_data, "p_meas": p_meas},
     )
 
 
 def main():
-    print("sinter.collect 集成：AG 零简并查表 vs surface MWPM（10.84）")
-    print("=" * 74)
+    ps = (0.01, 0.02, 0.03)
+    p_meas = 0.01
+    shots = 5000
 
-    # AG(4,1) 任务（自定义解码器 lookup）
-    ag_tasks_list = []
-    ag_decs = {}
-    for p in (0.01, 0.02, 0.03):
-        task, decs = ag_tasks(p, 0.01, 5000)
-        ag_tasks_list.append(task)
-        ag_decs['lookup'] = decs['lookup']
+    # 组装任务
+    tasks = []
+    custom = {}
+    for p in ps:
+        task, decs = ag_task(p, p_meas, shots)
+        tasks.append(task)
+        custom["lookup"] = decs["lookup"]
+    for p in ps:
+        tasks.append(surface_task(3, p, p_meas))
 
-    # surface 任务（pymatching）
-    sf_tasks = [surface_task(3, p, 0.01, 5000) for p in (0.01, 0.02, 0.03)]
-
-    # 运行 sinter.collect
-    all_tasks = ag_tasks_list + sf_tasks
+    # sinter.collect（标准流程，固定解码器集合）
     stats = sinter.collect(
         num_workers=2,
-        tasks=all_tasks,
-        max_shots=5000,
-        decoders=['lookup', 'pymatching'],
-        custom_decoders=ag_decs,
+        tasks=tasks,
+        max_shots=shots,
+        decoders=["lookup", "pymatching"],
+        custom_decoders=custom,
         print_progress=False,
     )
 
-    print(f'\n{"code":<14}{"decoder":<12}{"p":>6}{"shots":>8}{"p_L":>12}')
-    print('-' * 56)
-    for st in sorted(stats, key=lambda s: (s.json_metadata['code'], s.json_metadata['p_data'])):
-        code = st.json_metadata['code']
-        p = st.json_metadata['p_data']
-        pL = st.errors / st.shots if st.shots else float('nan')
-        print(f'{code:<14}{st.decoder:<12}{p:>6.2f}{st.shots:>8}{pL:>12.5f}')
+    # 结构化输出
+    DATA_DIR.mkdir(exist_ok=True)
+    out_path = DATA_DIR / "sinter_benchmark.csv"
+    with open(out_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["code", "decoder", "p_data", "p_meas", "shots", "errors", "p_L"])
+        rows = []
+        for st in sorted(stats, key=lambda s: (s.json_metadata["code"], s.json_metadata["p_data"])):
+            pL = st.errors / st.shots if st.shots else float("nan")
+            w.writerow([st.json_metadata["code"], st.decoder,
+                        st.json_metadata["p_data"], p_meas, st.shots, st.errors, f"{pL:.6f}"])
+            rows.append((st.json_metadata["code"], st.decoder, st.json_metadata["p_data"], pL))
+    print(f"结果已写入 {out_path}")
+
+    print(f"\n{'code':<24}{'decoder':<10}{'p':>6}{'shots':>8}{'p_L':>12}")
+    print("-" * 62)
+    for code, decoder, p, pL in sorted(rows):
+        print(f"{code:<24}{decoder:<10}{p:>6.2f}{shots:>8}{pL:>12.6f}")
 
 
 if __name__ == "__main__":
