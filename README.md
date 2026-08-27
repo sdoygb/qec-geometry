@@ -279,6 +279,34 @@ class count = `2^m`, size per class = `(2^m−1)(2^m−2)/6` — exactly the
 PG(m−1,2) line count. A deep duality between the two complete families
 (AG d−1 layer degeneracy = PG logical count). Verified m = 4..6.
 
+### 9. General RM(r,m) degeneracy classes — O1 for all r (NEW)
+
+The RM(1,m) weight-2 answer (O1) generalizes to **every** r: for CSS(RM(r,m))
+the weight-`2^r` degeneracy classes are determined completely by the affine
+span dimension of the error support (10.32 inclusion-equivalence, Theorem
+10.32.1.01):
+
+| Class type | Affine span of A | # classes | size/class |
+|---|---|---|---|
+| r-flat class | exactly r (A is an r-flat) | `[m r]_2` (Gaussian binomial) | `2^{m−r}` |
+| (r+1)-aff class | exactly r+1 (A in unique (r+1)-flat) | `flats(m,r+1)·E(r+1,2^r)/2` | 2 |
+
+```python
+from qecgeo import rm_degeneracy_classes
+rm_degeneracy_classes(5, 2)   # RM(2,5): 17515 classes
+#  n_flat_classes=155 × size 8 (2^{5−2})  +  n_aff_classes=17360 × size 2
+rm_degeneracy_classes(8, 3)   # ratio 1.007e-4  (matches 10.32 closed form)
+```
+
+- **r=1 degenerates to O1**: `E(2,2)=0` → only the r-flat class survives,
+  class count `2^m−1`, size `2^{m−1}` — exactly `rm1_w2_degeneracy`.
+- **Member conservation**: `[m r]_2·2^{m−r} + flats(m,r+1)·E(r+1,2^r)`
+  = the 10.33 degeneracy-ratio numerator (full degeneracy for r ≤ 2;
+  partial for r ≥ 3, e.g. RM(3,8) ratio ≈ 1.007×10⁻⁴).
+- Verified by full enumeration for RM(1,4..6), RM(2,4/5), RM(3,4)
+  (`scripts/verify_degeneracy_classes.py`); all member counts + ratios
+  conserved up to RM(8,4).
+
 ## Honest limitations
 
 - The A0/A1 geometric separation is a **sub-threshold phenomenon**: at noise

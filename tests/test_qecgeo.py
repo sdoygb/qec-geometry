@@ -144,3 +144,58 @@ class TestQECClosedFormClass:
         p = ag_params(6, 2)
         assert cf.c_d == p["c_d"]
         assert cf.encoding_rate() == p["rate"]
+
+
+class TestRmDegeneracyClasses:
+    """RM(r,m) 权重 2^r 层简并类结构通用闭式（10.30 开放问题 1 的 r≥1 推广）。"""
+
+    def test_r1_matches_original(self):
+        """r=1 退化精确回到 rm1_w2_degeneracy。"""
+        from qecgeo.closedform import rm_degeneracy_classes, rm1_w2_degeneracy
+        for m in (4, 6, 8):
+            d = rm_degeneracy_classes(m, 1)
+            old = rm1_w2_degeneracy(m)
+            assert d["n_classes"] == old["classes"]
+            assert d["size_flat_class"] == old["size_per_class"]
+            assert d["uniform"]
+
+    def test_known_enumeration_values(self):
+        """闭式与全量枚举已知值一致（RM(2,4)=875 等）。"""
+        from qecgeo.closedform import rm_degeneracy_classes
+        assert rm_degeneracy_classes(4, 2)["n_classes"] == 875
+        assert rm_degeneracy_classes(5, 2)["n_classes"] == 17515
+        assert rm_degeneracy_classes(4, 3)["n_classes"] == 6435
+        assert rm_degeneracy_classes(5, 1)["n_classes"] == 31
+
+    def test_class_size_structure(self):
+        """类大小结构：r-平坦类 2^{m-r}，(r+1)-仿射包类 2。"""
+        from qecgeo.closedform import rm_degeneracy_classes
+        d = rm_degeneracy_classes(5, 2)
+        assert d["size_flat_class"] == 8          # 2^{5-2}
+        assert d["n_flat_classes"] == 155         # [5 2]_2
+        assert d["n_aff_classes"] == 17360
+        assert d["size_aff_class"] == 2
+
+    def test_member_conservation(self):
+        """成员总数 = 10.33 简并比例分子。"""
+        from qecgeo.closedform import rm_degeneracy_classes, flats, E
+        for (m, r) in [(8, 1), (8, 2), (8, 3), (6, 4)]:
+            d = rm_degeneracy_classes(m, r)
+            w0 = 1 << r
+            expect = flats(m, r) + flats(m, r + 1) * E(r + 1, w0)
+            assert d["members"] == expect
+            assert 0 <= d["degenerate_ratio"] <= 1
+
+    def test_r3_ratio_matches_10_32(self):
+        """RM(3,8) 简并比例 = 10.32 闭式 1.007×10⁻⁴。"""
+        from qecgeo.closedform import rm_degeneracy_classes
+        d = rm_degeneracy_classes(8, 3)
+        assert abs(float(d["degenerate_ratio"]) - 1.007e-4) < 1e-6
+
+    def test_class_api(self):
+        """QECClosedForm 类 API 暴露简并类结构。"""
+        from qecgeo import QECClosedForm
+        from qecgeo.closedform import rm_degeneracy_classes
+        cf = QECClosedForm(6, 2)
+        d = cf.degeneracy_classes()
+        assert d["n_classes"] == rm_degeneracy_classes(6, 2)["n_classes"]

@@ -23,6 +23,7 @@ from .closedform import (ag_params, pg_params, zero_loss_boundary,
                          degeneracy_ratio_next, logical_operator_count,
                          pg_logical_count, loss_exponent, detection_rate,
                          miss_conditional_fidelity, rm1_w2_degeneracy,
+                         rm_degeneracy_classes,
                          ag_dminus1_syndrome, QECClosedForm, TRANSVERSAL_GATES)
 
 __version__ = "0.3.0"

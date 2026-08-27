@@ -203,6 +203,43 @@ def rm1_w2_degeneracy(m):
     return dict(classes=(1 << m) - 1, size_per_class=1 << (m - 1))
 
 
+def rm_degeneracy_classes(m, r):
+    """RM(r,m) 权重 2^r 层简并类结构闭式（10.30 开放问题 1 的 r≥1 通用化）。
+
+    类 = 共享 syndrome 的权重 w0=2^r X 错误集（10.32 定理 10.32.1.01 包含性等价）。
+    类结构由仿射包维数完全决定：
+
+      (a) r-平坦类：A 本身是 r-平坦（仿射包恰 r 维）。
+          类数 = [m r]_2（高斯二项），每类大小 = 2^{m−r}
+          （= A 自身 1 + 含 A 的 (r+1)-平坦数 (2^{m−r}−1) 个补集伙伴 P∖A）。
+      (b) (r+1)-仿射包类：A 仿射包恰 r+1 维（含于唯一 (r+1)-平坦 P=aff(A)）。
+          伙伴唯一 B = P∖A，每类大小 = 2。
+          类数 = flats(m,r+1)·E(r+1,2^r)/2。
+
+    成员守恒：类数×大小 之和 = flats(m,r) + flats(m,r+1)·E(r+1,2^r)
+              = 10.33 简并比例分子 P_r(m)·C(2^m, 2^r)（r≤2 全简并时 = C(2^m,2^r)；
+              r=3 部分简并，m=5: 796700 < C(32,8)=10518300）。
+
+    r=1 退化：E(2,2)=0（2 点子集仿射包 ≤1 维）→ 仅 (a) 类，类数 2^m−1、
+    大小 2^{m−1}，精确回到 rm1_w2_degeneracy。
+    验证：RM(1,4..6) 15/31/63 类，RM(2,4)=875、RM(2,5)=17515、RM(3,4)=6435，
+    全量枚举一致（qec-geometry/scripts/verify_degeneracy_classes.py）。
+    """
+    w0 = 1 << r
+    n_flat = gb(m, r)                      # (a) r-平坦类数
+    size_flat = 1 << (m - r)               # (a) 每类大小 2^{m−r}
+    n_aff = flats(m, r + 1) * E(r + 1, w0) // 2   # (b) (r+1)-仿射包类数
+    total = n_flat + n_aff
+    members = n_flat * size_flat + n_aff * 2
+    return dict(family=f"RM({r},{m})", m=m, r=r, w0=w0,
+                n_classes=total,
+                n_flat_classes=n_flat, size_flat_class=size_flat,
+                n_aff_classes=n_aff, size_aff_class=2,
+                members=members,
+                degenerate_ratio=Fraction(members, comb(1 << m, w0)),
+                uniform=(n_aff == 0))
+
+
 def ag_dminus1_syndrome(m, r):
     """AG 完备码权重 d−1 层 syndrome 分布闭式（10.30 开放问题 2 解答）。
 
@@ -262,6 +299,10 @@ class QECClosedForm:
         """权重 d 逻辑算符数（定理 10.30.2.04）。"""
         return logical_operator_count(self.m, self.r)
 
+    def degeneracy_classes(self):
+        """权重 2^r 层简并类结构（rm_degeneracy_classes 通用闭式）。"""
+        return rm_degeneracy_classes(self.m, self.r)
+
     @staticmethod
     def detection_rate(theta):
         """检测率闭式 p_det(θ) = sin²(θ/2)（10.29 预言 2a）。"""
@@ -279,4 +320,4 @@ __all__ = ["ag_params", "pg_params", "zero_loss_boundary", "loss_at_theta",
            "degeneracy_ratio", "degeneracy_ratio_next", "logical_operator_count",
            "pg_logical_count", "loss_exponent", "detection_rate",
            "miss_conditional_fidelity", "rm1_w2_degeneracy",
-           "ag_dminus1_syndrome", "QECClosedForm"]
+           "rm_degeneracy_classes", "ag_dminus1_syndrome", "QECClosedForm"]
