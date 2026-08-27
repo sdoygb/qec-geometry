@@ -220,3 +220,28 @@ class TestRegressionMutations(unittest.TestCase):
         R = dec.decode(dec.syndrome_of(E))
         self.assertFalse(all(x == 0 for x in R.t),
                          "decode(X0 syndrome) 应返回非平凡恢复（X0）")
+
+
+class TestSCLDecoder(unittest.TestCase):
+    """真 Reed 递推（syndrome 版）：SCL 列表递归解码器。"""
+
+    def _scl_ok(self, m, r, wmax, n_random):
+        from qecgeo.rm_scl_decoder import rm_scl_decode
+        n = 1 << m
+        rng = random.Random(42)
+        for _ in range(n_random):
+            w = rng.randint(1, wmax)
+            A = sorted(rng.sample(range(n), w))
+            mm = moments_of(A, m, r)
+            recs = rm_scl_decode(mm, m, r)
+            self.assertTrue(any(r2 == A for r2 in recs),
+                            f"(m={m},r={r}) A={A}: SCL 未恢复")
+
+    def test_m4_r2_w3(self):
+        self._scl_ok(4, 2, 3, 30)
+
+    def test_m5_r2_w3(self):
+        self._scl_ok(5, 2, 3, 20)
+
+    def test_m6_r3_w5(self):
+        self._scl_ok(6, 3, 5, 15)
