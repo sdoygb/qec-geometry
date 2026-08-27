@@ -435,7 +435,6 @@ Under **depolarizing noise** this pushes p_L ≈ P(w ≥ d) exponentially low:
 
 | code | d | p=0.01 | p=0.02 | p=0.03 |
 |---|---|---|---|---|
-| surface [[9,1,3]] (lookup, measured) | 3 | 0.00167 | 0.00587 | 0.01330 |
 | AG(6,2) [[64,20,8]] (zero-deg., theory) | 8 | ≈0 | 0.00005 | 0.00068 |
 | AG(8,3) [[256,70,16]] (zero-deg., theory) | 16 | ≈0 | 0.00004 | 0.00504 |
 
@@ -444,13 +443,12 @@ differential, data depolarize + MR flip p_meas=0.01, `scripts/ag_stim_memory.py`
 
 | code | decoder | p=0.01 | p=0.02 | p=0.03 |
 |---|---|---|---|---|
-| **AG(4,1) [[16,6,4]]** | **lookup (zero-deg.)** | **0.00370** | **0.01100** | **0.01990** |
-| surface d=3 (17 data) | MWPM (industry standard) | 0.01210 | 0.02510 | 0.03280 |
+| **AG(4,1) [[16,6,4]]** | **lookup (zero-deg.)** | **0.00320** | **0.01240** | **0.02040** |
+| AG(4,1) | pymatching (MWPM) | 0.03120 | 0.05180 | 0.06920 |
 
-**AG(4,1) with a simple lookup table beats surface d=3 with MWPM** (3.3× at
-p=0.01), with a smaller code (16 vs 17) and more logical qubits (k=6 vs 1).
-Zero degeneracy translates directly into a physical-noise advantage — no
-complex decoder needed. Infrastructure verified: single-round circuits give
+Zero degeneracy ⟹ a lookup decoder suffices (no complex decoder needed);
+on the AG code the lookup table outperforms MWPM, which is designed for
+degenerate/local codes (dense syndromes). Infrastructure verified: single-round circuits give
 random X-stabilizer measurements (|0⟩ is not an X eigenstate), so rounds=2
 reference + differential detectors are required (noise-free → all-zero
 detectors ✓); differential extraction recovers the standard RM generators ✓;
@@ -465,7 +463,6 @@ and `sinter.collect` runs the full comparison (`scripts/sinter_collect_demo.py`)
 |---|---|---|---|---|
 | **AG(4,1)** | **lookup (geometry)** | **0.00540** | **0.01260** | **0.02140** |
 | AG(4,1) | pymatching (MWPM) | 0.02900 | 0.05300 | 0.06900 |
-| surface d=3 | lookup (cross-code control) | 0.09000 | 0.12800 | 0.15800 |
 | surface d=3 | pymatching (MWPM) | 0.01440 | 0.02460 | 0.03800 |
 
 **Note**: the `lookup` rows use a decoder trained on CSS(RM(1,4)); the
@@ -511,8 +508,8 @@ mismatch only. Numbers above are from `data/sinter_benchmark.csv`
   made until verified.
 - **AG p_L numbers**: zero-degeneracy values are theoretical (w < d fully
   recovered by the zero-degeneracy theorem, w ≥ d conservatively counted as
-  failure); the stim multi-round AG(4,1) vs surface MWPM comparison is fully
-  simulated (same circuit-level noise model).
+  failure); the stim multi-round AG(4,1) lookup-vs-pymatching comparison is
+  fully simulated (same circuit-level noise model).
 
 ### 4. AG complete-code closed forms: parameters without circuits (NEW)
 
