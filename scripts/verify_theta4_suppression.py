@@ -70,13 +70,23 @@ def main():
     # PG 跨层简并 1/3：315/945
     print(f"{'PG 跨层简并比例':<16} {'3':>3} {'1/3（315/945）':<16} {'(理论)':<14} {'-':<14}")
 
-    # AG r=1：fail(2) = 1 - 2^{1-m}（枚举验证）
+    # AG r=1：fail(2) 理论 = 1 - 2^{1-m}（X 型）；全类型 fail(2) 用
+    # LookupDecoder 真枚举（260827 修复：此前该列为硬编码字符串，B7）
+    from qecgeo import LookupDecoder
+    from qecgeo.pauli import Pauli
     for m in (4, 5, 6):
         p = ag_params(m, 1)
         ur, conf = enumerate_w2_uniqueness(m, 1)
         theory_fail = 1.0 - 2 ** (1 - m)
+        # 全类型 fail(2)：构建解码器枚举
+        n, gens = rm_css_gens(m, 1)
+        gens_p = [Pauli(n, [1 if x else 0 for x in g]) for g in gens]
+        gens_p += [Pauli(n, [2 if x else 0 for x in g]) for g in gens]
+        dec = LookupDecoder(gens_p, n)
+        dec.build(w_max=2)
+        fail_all = dec.fail_rate(2)
         print(f"{f'AG r=1 m={m} [[{p['n']},,4]]':<16} {'4':>3} "
-              f"{f'{theory_fail:.6f}':<16} {f'(全简并 fail≈{theory_fail:.4f})':<14} "
+              f"{f'{theory_fail:.6f}':<16} {f'{fail_all:.6f}':<14} "
               f"{f'{ur:.6f}':<14}")
 
     # AG r=2,3：fail(2) = 0（零简并，枚举）

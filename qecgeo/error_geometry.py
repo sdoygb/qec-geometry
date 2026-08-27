@@ -11,8 +11,10 @@
   配对边特征（MWPM）：n_edges / bdry_edges / total_dist / max_dist
               / long_straight（最长内部边直度）/ long_rate
 
-已知结果（10.54，surface code L=4）：配对层 total_dist A1/A0 ≈ 3.00×，
-cross 穿越率 A1 远高于 A0 —— 配对层是 A0/A1 分类的最强区分层。
+已知结果（10.54，surface code L=4，**须 p ≪ p_th ≈ 0.011**）：配对层
+total_dist A1/A0 ≈ 3.00×，cross 穿越率 A1 远高于 A0 —— 配对层是 A0/A1
+分类的最强区分层。注（260827）：默认 noise=0.03 是文章**对照组**（全塌缩，
+无分离）；复现分离需 noise=0.005（见 run_error_geometry 默认已改）。
 
 依赖：stim + pymatching（可选，仅 surface code 演示需要）；chromobius（可选，仅 color code 解码需要）。
 """
@@ -229,15 +231,23 @@ def _analyze_one(dets, coords, exc_counts, x0, y0, gx, gy, s):
                     min_pair = dist
                 if dist > diam:
                     diam = dist
-    # 边界距离（激发点到码边界的最小距离，相对坐标）
-    bdry = min(min(x - x0, gx - x, y - y0, gy - y) for x, y, _ in pts)
-    # 穿越判据（A1 拓扑本质：错误链同时接触相对边界）
+    # 边界距离（激发点到码边界的最小距离，相对坐标；仅非退化维度，
+    # 260827 修复：1D 坐标 y0==gy 时 y 项恒 0 使 bdry 恒 0）
+    bdry_cands = []
+    if gx > x0:
+        bdry_cands += [x - x0 for x, _, _ in pts] + [gx - x for x, _, _ in pts]
+    if gy > y0:
+        bdry_cands += [y - y0 for _, y, _ in pts] + [gy - y for _, y, _ in pts]
+    bdry = min(bdry_cands) if bdry_cands else 0.0
+    # 穿越判据（A1 拓扑本质：错误链同时接触相对边界；仅对非退化维度，
+    # 260827 修复：1D 时 width_y=0 使 `>= -1e-6` 恒真 → 单激发也 cross=1）
     xs_all = [p[0] for p in pts]
     ys_all = [p[1] for p in pts]
     width_x = (gx - x0) if gx > x0 else 0.0
     width_y = (gy - y0) if gy > y0 else 0.0
-    cross = int((max(xs_all) - min(xs_all) >= width_x - 1e-6) or
-                (max(ys_all) - min(ys_all) >= width_y - 1e-6))
+    cross_x = width_x > 0 and (max(xs_all) - min(xs_all) >= width_x - 1e-6)
+    cross_y = width_y > 0 and (max(ys_all) - min(ys_all) >= width_y - 1e-6)
+    cross = int(cross_x or cross_y)
     # 每层最大簇
     max_cluster = 0
     for t, ps in layers.items():
@@ -481,8 +491,12 @@ def diagnose_circuit(circuit, shots, with_edges=True, seed=None, decoder='pymatc
     # 穿越率提升（A1 本质特征）
     c0 = st["ok"].get("cross_rate")
     c1 = st["err"].get("cross_rate")
-    if c0 is not None and c1 is not None and c0 > 0:
-        out["cross_lift"] = float(c1 / c0)
+    if c0 is not None and c1 is not None:
+        if c0 > 0:
+            out["cross_lift"] = float(c1 / c0)
+        elif c1 > 0:
+            out["cross_lift"] = float('inf')  # A0 零穿越、A1 有 → 最强分离
+        # 两者都 0 或 None → cross_lift 保持 None
     # 激发层区分度
     for field in ("exc", "min_pair", "n_layers", "diam", "bdry", "cluster"):
         r = _ratio_line(field, st["ok"], st["err"])
@@ -505,7 +519,10 @@ def diagnose_circuit(circuit, shots, with_edges=True, seed=None, decoder='pymatc
     return out
 
 
-def run_error_geometry(L=4, rounds=3, noise=0.03, shots=20000, with_edges=True, seed=None):
-    """surface code 便捷入口：错误模式几何分析（10.54 复现）"""
+def run_error_geometry(L=4, rounds=3, noise=0.005, shots=20000, with_edges=True, seed=None):
+    """surface code 便捷入口：错误模式几何分析（10.54 复现）。
+
+    默认 noise=0.005（< p_th ≈ 0.011，分离显著；260827 由 0.03 改为 0.005——
+    0.03 是文章对照组，全塌缩无分离）。"""
     circuit = build_surface_circuit(L, rounds, noise)
     return diagnose_circuit(circuit, shots, with_edges=with_edges, seed=seed)

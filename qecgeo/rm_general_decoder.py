@@ -130,6 +130,9 @@ class RMMomentDecoder:
                             continue
                         if np.all((rem - self.M_pt[c] - self.M_pt[dp]) % 2 == 0):
                             return sorted({a, b, c, dp})
+            # 注（260827 复核）：一般 4 点（非平行四边形）未覆盖——但 r=2 的
+            # (d−1)/2=3，权重 4 恒超出可纠范围（m=6 实测 0.5% 矩碰撞），
+            # 属理论极限而非缺陷；超出可纠范围的错误无法保证恢复。
         # 高权重（|A| ≥ 5）：MILP 兜底（scipy.milp，最小权重矩方程）
         # 适用：n ≤ 128 秒级；n=256 的 16 点超时（标注边界）
         if n <= 128:

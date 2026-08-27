@@ -31,7 +31,7 @@ class StabilizerCode:
             assert self.lx.commutes(g) and self.lz.commutes(g), \
                 f'{self.name}: 逻辑算符与生成元不对易'
         assert not self.lx.commutes(self.lz), \
-            f'{self.name}: X̄ 与 Z̄ 对易'
+            f'{self.name}: X̄ 与 Z̄ 应反交换（实际对易）'
         # 独立性：symplectic 矩阵秩 = m
         M = np.zeros((self.m, 2 * self.n), dtype=int)
         for r, g in enumerate(self.gens):
@@ -43,6 +43,12 @@ class StabilizerCode:
 
     # ---------- 稳定子群 ----------
     def _build_group(self):
+        # 260827 保护：群大小 2^m 指数爆炸（m=20 已实测 5.5s/351MB；
+        # m≥25 必 OOM）。与 LookupDecoder._ensure_group 的 m>20 拒绝一致。
+        if self.m > 20:
+            raise MemoryError(
+                f'稳定子群大小 2^{self.m} 过大，无法构建。'
+                f'StabilizerCode 的 group/in_group/logical_zero 仅适用于 m ≤ 20。')
         elems = [Pauli.I(self.n)]
         for g in self.gens:
             elems = elems + [e * g for e in elems]
