@@ -15,14 +15,38 @@
 用法: python3 scripts/mutation_test.py
 输出: 每个变异的 [存活/被杀] + 总变异得分（被杀/总数）
 """
+import atexit
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DECODER = os.path.join(REPO, 'qecgeo', 'decoder.py')
+
+# ---- 中断恢复保证（260827 加固）----
+# 变异注入期间任何中断（Ctrl-C / SIGTERM / 异常 / 退出）都必须恢复原始源码。
+# 机制：启动时快照原始内容；signal handler + atexit + finally 三层兜底。
+_ORIGINAL_SRC = None
+
+
+def _restore_decoder():
+    """把 decoder.py 恢复为启动时的原始内容（幂等，可多次调用）。"""
+    global _ORIGINAL_SRC
+    if _ORIGINAL_SRC is not None:
+        try:
+            open(DECODER, 'w', encoding='utf-8').write(_ORIGINAL_SRC)
+        except Exception:
+            pass  # 恢复失败也不掩盖原始错误
+
+
+def _signal_handler(signum, frame):
+    """SIGINT/SIGTERM：立即恢复源码再退出。"""
+    _restore_decoder()
+    print(f"\n[变异测试] 收到信号 {signum}，已恢复原始源码，退出")
+    sys.exit(128 + signum)
 
 
 def apply_mutation(src, name):
@@ -84,25 +108,31 @@ def run_tests():
 
 
 def main():
-    src = open(DECODER, encoding='utf-8').read()
+    global _ORIGINAL_SRC
+    # 1. 快照原始源码（启动时）
+    _ORIGINAL_SRC = open(DECODER, encoding='utf-8').read()
+    # 2. 注册中断恢复：signal handler + atexit 兜底
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+    atexit.register(_restore_decoder)
+
     print("变异测试：注入 bug → 跑测试 → 统计抓错能力")
     print("=" * 60)
     results = []
     for name in ('M1_syndrome_zero', 'M2_in_group_phase', 'M3_fail_rate_v',
                  'M4_skip_Y', 'M5_decode_wrong'):
-        mutated = apply_mutation(src, name)
+        mutated = apply_mutation(_ORIGINAL_SRC, name)
         if mutated is None:
             print(f"  {name:<20} [跳过: 模式不适用]")
             continue
-        # 备份 + 写入变异
-        backup = open(DECODER, encoding='utf-8').read()
+        # 写入变异（每次从原始快照重新注入，避免累积）
         open(DECODER, 'w', encoding='utf-8').write(mutated)
         try:
             passed, n = run_tests()
         except subprocess.TimeoutExpired:
             passed, n = False, 0
         finally:
-            open(DECODER, 'w', encoding='utf-8').write(backup)  # 恢复
+            _restore_decoder()  # 恢复（幂等）
         killed = not passed
         results.append((name, killed, n))
         print(f"  {name:<20} [{('被杀' if killed else '存活!')}] {n} 测试")
@@ -114,6 +144,12 @@ def main():
     if alive:
         print(f"存活变异（测试盲区）: {alive}")
         print("→ 需要补测试覆盖这些盲区")
+    else:
+        print("→ 无存活变异：测试体系抓住所有注入 bug")
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":
