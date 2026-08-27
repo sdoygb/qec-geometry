@@ -13,7 +13,7 @@ qecgeo  ──  Pauli algebra ── stabilizer framework ── code zoo ──
 ---
 
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21946024.svg)](https://doi.org/10.5281/zenodo.21946024)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21946023.svg)](https://doi.org/10.5281/zenodo.21946023)
 
 ## What it does
 
