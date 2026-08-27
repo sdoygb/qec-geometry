@@ -134,12 +134,12 @@ def decode_r2(mm, m):
 
 
 def rm_x_decode(syndrome, m, r):
-    """从 syndrome（矩 dict）恢复最小权重错误支撑 A（|A| ≤ 2^r）。"""
-    if r == 1:
-        return decode_r1(syndrome, m)
-    if r == 2:
-        return decode_r2(syndrome, m)
-    raise NotImplementedError(f"r={r} 的矩恢复未实现（原型覆盖 r=1,2）")
+    """从 syndrome（矩 dict）恢复最小权重错误支撑 A（|A| ≤ 2^r）。
+
+    委托给通用解码器（rm_general_decoder，支持 r ≥ 1，矩阵查表）。
+    """
+    from .rm_general_decoder import rm_x_decode as _gen
+    return _gen(syndrome, m, r)
 
 
 def css_rm_x_decode(syndrome, m, r):

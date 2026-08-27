@@ -488,3 +488,46 @@ class TestRmDecoder:
                 R_mom = Pauli(n, [1 if i in A_rec else 0 for i in range(n)])
                 zero = tuple([0] * len(gens))
                 assert dec_tbl.syndrome_of(E * R_mom) == zero
+
+
+class TestRmDecoderHighR:
+    """通用 Reed-Muller 解码器（r≥3，d=16/32 码）。"""
+
+    def test_r3_d16_low_weight(self):
+        """CSS(RM(3,8)) [[256,·,16]]：权重 ≤ 3 全部恢复。"""
+        import random
+        from qecgeo import moments_of, rm_x_decode
+        random.seed(5)
+        m, r = 8, 3
+        n = 1 << m
+        for _ in range(50):
+            w = random.randint(0, 3)
+            A = random.sample(range(n), w)
+            mm = moments_of(A, m, r)
+            dec = rm_x_decode(mm, m, r)
+            assert dec is not None
+            assert moments_of(dec, m, r) == mm
+
+    def test_r4_d32_low_weight(self):
+        """CSS(RM(4,10)) [[1024,·,32]]：权重 ≤ 2 毫秒级恢复（查表不可行规模）。"""
+        import random, time
+        from qecgeo import moments_of, rm_x_decode
+        random.seed(6)
+        m, r = 10, 4
+        n = 1 << m
+        t0 = time.time()
+        for _ in range(30):
+            w = random.randint(0, 2)
+            A = random.sample(range(n), w)
+            mm = moments_of(A, m, r)
+            dec = rm_x_decode(mm, m, r)
+            assert dec is not None
+            assert moments_of(dec, m, r) == mm
+        assert (time.time() - t0) < 5.0  # 30 次 < 5s（毫秒级/次）
+
+    def test_zsupport_weight(self):
+        """CSS(RM(r,m)) 逻辑 Z 支撑 = x1x2 → 权重 2^{m-2}。"""
+        from qecgeo import css_rm_zsupport
+        for m in (4, 6, 10):
+            z = css_rm_zsupport(m, 1)
+            assert len(z) == (1 << (m - 2))
