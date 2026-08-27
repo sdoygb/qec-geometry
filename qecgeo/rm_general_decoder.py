@@ -144,31 +144,37 @@ def _milp_decode(mm, m, r, dec, time_limit=30):
 
     线性化：G e - 2k = m（k 整数）。scipy.milp 正规求解。
     适用：n ≤ 128 高权重错误秒级；大 n 超时返回 None。
+
+    注意（260827 复核）：scipy 缺失时 raise ImportError（不再静默）；求解
+    失败/超时返回 None 并打印 warning（诚实标注，不静默）。
     """
+    from scipy.optimize import milp, LinearConstraint, Bounds
+    n, K = dec.n, dec.K
+    m_vec = dec._vec(mm)
+    if np.all(m_vec == 0):
+        return []
+    # 矩阵 G：复用预计算的单点矩表（G[t,a] = M_pt[a,t]）
+    G = dec.M_pt.T.astype(int)   # (K, n)
+    nv = n + K
+    c = np.zeros(nv); c[:n] = 1
+    A = np.hstack([G, -2 * np.eye(K, dtype=int)])
+    lc = LinearConstraint(A, lb=m_vec, ub=m_vec)
+    ub = np.ones(nv); ub[n:] = 1e9
+    bounds = Bounds(lb=np.zeros(nv), ub=ub)
+    integrality = np.ones(nv)
     try:
-        from scipy.optimize import milp, LinearConstraint, Bounds
-        n, K = dec.n, dec.K
-        m_vec = dec._vec(mm)
-        if np.all(m_vec == 0):
-            return []
-        # 矩阵 G：复用预计算的单点矩表（G[t,a] = M_pt[a,t]）
-        G = dec.M_pt.T.astype(int)   # (K, n)
-        nv = n + K
-        c = np.zeros(nv); c[:n] = 1
-        A = np.hstack([G, -2 * np.eye(K, dtype=int)])
-        lc = LinearConstraint(A, lb=m_vec, ub=m_vec)
-        ub = np.ones(nv); ub[n:] = 1e9
-        bounds = Bounds(lb=np.zeros(nv), ub=ub)
-        integrality = np.ones(nv)
         res = milp(c=c, constraints=lc, integrality=integrality,
                    bounds=bounds, options={'time_limit': time_limit})
-        if res.success:
-            e = np.round(res.x[:n]).astype(int)
-            A_rec = [i for i in range(n) if e[i]]
-            if moments_of(A_rec, m, r) == mm:
-                return sorted(A_rec)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f'[warning] MILP 求解失败（n={n}, |A|≥5）：{e}——返回 None')
+        return None
+    if res.success:
+        e = np.round(res.x[:n]).astype(int)
+        A_rec = [i for i in range(n) if e[i]]
+        if moments_of(A_rec, m, r) == mm:
+            return sorted(A_rec)
+    else:
+        print(f'[warning] MILP 未收敛（n={n}, |A|≥5, time_limit={time_limit}s）——返回 None')
     return None
 
 

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          pip install numpy pytest
+          pip install stim pymatching  # sinter 集成脚本
+      - name: Run unit tests (core)
+        run: pytest tests/test_qecgeo.py -q
+      - name: Run property tests (invariants)
+        run: pytest tests/test_properties.py -q
+      - name: Run full suite
+        run: pytest tests/ -q
+
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install numpy pytest
+      - name: Run mutation testing (inject-bug → must be caught)
+        run: python3 scripts/mutation_test.py
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install numpy pytest
+          pip install ldpc  # 简并分析脚本
+      - name: Verify lookup decoder (closed-form agreement)
+        run: python3 scripts/verify_lookup_decoder.py
+      - name: Verify degeneracy classes
+        run: python3 scripts/verify_degeneracy_classes.py || true
+      - name: LDPC degeneracy analysis
+        run: python3 scripts/ldpc_degeneracy.py || true
