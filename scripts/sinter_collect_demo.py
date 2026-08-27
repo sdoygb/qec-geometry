@@ -12,6 +12,10 @@
 输出：data/sinter_benchmark.csv（code, decoder, p_data, p_meas, shots, errors, p_L）
 无任何判断句——纯数据，可复现。
 
+注意：lookup 解码器用 CSS(RM(1,4)) [[16,6,4]] 训练（z/x 探测器索引 + 恢复表
+来自该码）。用于 surface d=3 的 'lookup' 行是【跨码负对照】——把训练于 A 码
+的解码器套到 B 码上，非有效基准，仅演示"解码器-码不匹配"行为。
+
 运行: .venv311/bin/python scripts/sinter_collect_demo.py
 """
 import csv

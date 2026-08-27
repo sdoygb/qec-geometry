@@ -353,15 +353,22 @@ ratio is exactly **1/3** (m-independent), class size `2^{m−1}`, hence
 the weight-2 layer is zero-degenerate: uniqueness 1.0, fail(2) = 0, class count
 = error count (C(32,2)·9 = 4464 for [[32,·,8]]).
 
-Verified: [[5,1,3]]/[[7,1,3]]/[[15,7,3]]/[[16,6,4]] all enumerated errors
-recover successfully (weights 1–2); fail spectrum matches 10.35 Thm 1.02
+Verified (260827, after fixing `decode_error` to use exact group membership):
+[[5,1,3]]/[[7,1,3]]/[[15,7,3]]/[[16,6,4]] — **weight-1 errors all recover**
+(0 failures); weight-2 failures match the true correctable range (d=3 codes
+correct ≤ (d−1)/2 = 1 error, so weight-2 logical failures are expected:
+5-qubit 90/105, Steane 147/210, Hamming 735/1020; AG [[16,6,4]] weight-2
+fail 315/945 = 1/3). fail(2) formula matches 10.35 Thm 1.02 in its AG
+even-distance domain (verified 0.3125/0.2917 exact)
 (`scripts/verify_lookup_decoder.py`).
 
 ### 11. RM moment decoder: low-weight lookup + high-weight MILP fallback (NEW)
 
 Decode **CSS(RM(r,m)) X-errors from their moments** `m_I = Σ_{a∈A} x_I(a)`
-(|I| ≤ r): the error set A (|A| ≤ 2^r) is uniquely determined by its moments
-(10.83). Two regimes:
+(|I| ≤ r): the error set A is uniquely determined by its moments for weights
+≤ (d−1)/2 (the correctable range, guaranteed); at larger weights small m
+shows collisions (e.g. r=1 weight-2 collides for all m — linear moments are
+insufficient; r=2 m<7 weight-4 collides ~1%). Two regimes:
 
 | regime | method | latency | coverage |
 |---|---|---|---|
@@ -452,15 +459,14 @@ and `sinter.collect` runs the full comparison (`scripts/sinter_collect_demo.py`)
 |---|---|---|---|---|
 | **AG(4,1)** | **lookup (geometry)** | **0.00540** | **0.01260** | **0.02140** |
 | AG(4,1) | pymatching (MWPM) | 0.02900 | 0.05300 | 0.06900 |
-| surface d=3 | lookup | 0.08920 | 0.12120 | 0.15540 |
-| surface d=3 | pymatching (MWPM) | 0.01340 | 0.02200 | 0.03800 |
+| surface d=3 | lookup (cross-code control) | 0.09000 | 0.12800 | 0.15800 |
+| surface d=3 | pymatching (MWPM) | 0.01440 | 0.02460 | 0.03800 |
 
-**Decoder–code matching** (the clean takeaway): the zero-degenerate AG code
-needs a lookup table (MWPM underperforms on its dense syndromes, 5.4× worse);
-the degenerate surface code needs MWPM (lookup underperforms, 6.6× worse).
-Geometry's zero-degeneracy + lookup beats the industry-standard MWPM on
-surface by 2.5× (p=0.01) — the custom decoder plugs into the stim/sinter
-ecosystem (and tqec, which builds on sinter) via this interface.
+**Note**: the `lookup` rows use a decoder trained on CSS(RM(1,4)); the
+`surface + lookup` row is a cross-code control (a decoder trained on one code
+applied to another — not a valid benchmark), demonstrating decoder–code
+mismatch only. Numbers above are from `data/sinter_benchmark.csv`
+(5000 shots/cell, sinter 1.16, reproducible).
 
 ## Honest limitations
 

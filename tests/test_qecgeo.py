@@ -308,7 +308,7 @@ class TestLookupDecoder:
         return gens
 
     def test_small_code_correctness(self):
-        """[[5,1,3]]/[[7,1,3]]/[[15,7,3]] 全部枚举错误恢复成功（权重 ≤ 2）。"""
+        """[[5,1,3]]/[[7,1,3]]/[[15,7,3]] 权重 1 全部恢复；权重 2 部分失败（d=3 只纠 1 个错误）。"""
         from qecgeo import LookupDecoder
         from qecgeo.codes import five_qubit_code, steane_code, rm_code_15_7_3
         from itertools import combinations, product
@@ -316,7 +316,10 @@ class TestLookupDecoder:
         for code in (five_qubit_code(), steane_code(), rm_code_15_7_3()):
             dec = LookupDecoder(code.gens, code.n, name=code.name)
             dec.build(w_max=2)
-            ok = fail = 0
+            # 权重 1：全部恢复（单比特错误唯一可纠）
+            ok1 = fail1 = 0
+            # 权重 2：部分失败（d=3 → 只能纠权重 ≤ (d-1)/2 = 1 个错误）
+            ok2 = fail2 = 0
             for w in (1, 2):
                 for idxs in combinations(range(code.n), w):
                     for types in product((1, 2, 3), repeat=w):
@@ -324,11 +327,14 @@ class TestLookupDecoder:
                         for idx, ty in zip(idxs, types):
                             t[idx] = ty
                         success, _ = dec.correct(Pauli(code.n, t))
-                        ok += success
-                        fail += (not success)
-            # d=3 码：权重 1,2 全部可纠（无简并跨层冲突）→ fail = 0
-            assert fail == 0, f"{code.name}: {fail} 个解码失败"
-            assert ok > 0
+                        if w == 1:
+                            ok1 += success; fail1 += (not success)
+                        else:
+                            ok2 += success; fail2 += (not success)
+            # d=3 码：权重 1 无逻辑失败（fail1=0）；权重 2 存在逻辑失败（fail2>0）
+            assert fail1 == 0, f"{code.name}: 权重1 有 {fail1} 个失败（应 0）"
+            assert fail2 > 0, f"{code.name}: 权重2 应存在逻辑失败（d=3 只纠 1 错误）"
+            assert ok1 + ok2 > 0
 
     def test_ag_r2_weight2_zero_degeneracy(self):
         """AG r=2 权重 2 层零简并：唯一率 1.0、fail(2)=0、类数=错误数。"""

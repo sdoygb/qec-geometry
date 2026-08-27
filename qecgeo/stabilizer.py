@@ -50,7 +50,8 @@ class StabilizerCode:
         self.group = elems
 
     def in_group(self, E):
-        return any(E == s for s in self.group)
+        # 260827 修复：忽略相位（稳定子群的物理元素可带 ±1/±i 全局相位）
+        return any(E.t == s.t for s in self.group)
 
     # ---------- syndrome ----------
     def syndrome_of(self, E):

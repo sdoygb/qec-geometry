@@ -187,17 +187,58 @@ class LookupDecoder:
         """syndrome → 恢复操作（查表，O(1)）。未命中返回单位元。"""
         return self.table.get(syndrome, Pauli.I(self.n))
 
+    def _ensure_group(self):
+        """构建稳定子群（惰性）。群大小 2^m 可能爆炸——仅当需要精确判定时调用。
+
+        保护（260827）：m > 20（群 > 100 万）时拒绝构建，decode_error 需
+        回退到 syndrome==0 近似（见 decode_error 的说明）。
+        """
+        if self._group is None:
+            if self.m > 20:
+                raise MemoryError(
+                    f'稳定子群大小 2^{self.m} 过大，无法精确判定。'
+                    f'decode_error/correct 对大码(m>20)请用 syndrome==0 近似或逐错误处理。')
+            group = [Pauli.I(self.n)]
+            for g in self.gens:
+                group = group + [e * g for e in group]
+            self._group = group
+        return self._group
+
+    def in_group(self, E):
+        """精确群成员判定（残留 ∈ 稳定子群，忽略相位）。
+
+        注意（260827 修复）：稳定子群的物理元素可带 ±1/±i 相位（Pauli
+        乘积的全局相位），`E == s` 的相位精确比较会漏掉"稳定子×相位"的
+        等价残留（误判为逻辑错误）。正确判定 = 忽略相位的 t-vector 比较：
+        残留的支撑 pattern 是某稳定子的支撑 ⟺ 物理上可逆（相位无关）。
+        O(|群|)——小码可用，大码慎用（群大小 2^m 爆炸）。
+        """
+        return any(E.t == s.t for s in self._ensure_group())
+
     def decode_error(self, E):
         """给定实际错误 E：恢复后残留。返回 (残留, 是否逻辑错误)。
 
         残留 = E·R(s)。残留 ∈ 稳定子群 → 解码成功（可逆）；否则为逻辑错误
-        （残留含非平凡逻辑算符分量）。群元 syndrome 恒 0，故用
-        syndrome(残留) == 0 判定，O(m) 而非 O(|群|)。
+        （残留含非平凡逻辑算符分量）。
+
+        注意（260827 修复）：syndrome(残留)==0 只说明残留 ∈ normalizer
+        （与全部生成元对易），**不等于**残留 ∈ 稳定子群——残留可能是非平凡
+        逻辑算符（如 Steane 的权重 3 X 逻辑）。正确判定 = 精确群成员检查：
+        残留 ∈ group ⟺ 解码成功。代价 O(|群|)=2^m（小码可行；大码建议用
+        残留 syndrome==0 的快速近似，并知晓误报风险）。
         """
         s = self.syndrome_of(E)
         R = self.decode(s)
         resid = E * R
-        return resid, (self.syndrome_of(resid) != self.zero)
+        if self.syndrome_of(resid) != self.zero:
+            return resid, True  # 残留仍触发 syndrome → 明确逻辑错误
+        # syndrome==0：残留 ∈ normalizer。区分"群元"（成功）vs"非平凡逻辑"（失败）
+        try:
+            return resid, not self.in_group(resid)
+        except MemoryError:
+            # 大码（m>20）无法构建群：回退 syndrome==0 近似（残留 syndrome 0
+            # 视为群元——可能漏报逻辑错误，仅在无法精确判定时使用）
+            return resid, False
 
     def correct(self, E):
         """模拟纠错：返回 (是否成功, 残留 Pauli)。"""
@@ -227,7 +268,16 @@ class LookupDecoder:
 
         fail(w) = 1 − ⟨1/v⟩_w，其中 v = 该错误所在 syndrome 类大小，
         平均取全部权重 w 错误。等价闭式 fail(w) = 1 − Σ 1/v / N_w。
+
+        适用域（260827 复核）：v 取**全类大小**（含跨层成员），故该公式仅
+        在 AG 偶距离码的主阶层（同层简并、无跨层共享）与真实失败率一致
+        （实测 AG r=1 [[16,6,4]] fail(2)=0.2917 精确匹配）；对 d 为奇数的码
+        （Steane/五比特，权重 2 与权重 1 跨层共享）或类内相差稳定子的码
+        （Shor）失真（方向不定）。真实失败率用 decode_error/correct 枚举。
         """
+        if w > self._built_wmax:
+            raise ValueError(
+                f'fail_rate({w}) 超出已构建 w_max={self._built_wmax}——先 build(w_max≥{w})')
         self._ensure_classes()
         n_w = 0
         inv_sum = 0.0
@@ -244,8 +294,8 @@ class LookupDecoder:
 
     def weight2_uniqueness(self):
         """权重 2 层 syndrome 唯一率（AG r≥2 零简并的直接证据）。"""
-        if self._classes is None:
-            raise RuntimeError('先调用 build()')
+        if self._built_wmax < 2:
+            raise RuntimeError('先调用 build(w_max≥2) 或 build_fast(w_max≥2)')
         total = conflicts = 0
         seen = set()
         for E in self._iter_errors(2):
