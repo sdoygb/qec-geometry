@@ -26,4 +26,4 @@ from .closedform import (ag_params, pg_params, zero_loss_boundary,
                          rm_degeneracy_classes,
                          ag_dminus1_syndrome, QECClosedForm, TRANSVERSAL_GATES)
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
