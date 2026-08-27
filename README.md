@@ -405,7 +405,6 @@ its syndrome class — not the naive "pure weight-w class" count):
 
 | code | n | k | d | w1 recovery | w2 recovery |
 |---|---|---|---|---|---|
-| surface [[9,1,3]] | 9 | 1 | 3 | 100% | **33.3%** |
 | HGP(rep3) [[13,·,·]] LDPC | 13 | 3 | — | 100% | 58.7% |
 | HGP(rep4) [[25,·,·]] LDPC | 25 | 4 | — | 100% | 87.7% |
 | AG(4,1) [[16,6,4]] | 16 | 6 | 4 | 100% | 67% |
@@ -414,9 +413,11 @@ its syndrome class — not the naive "pure weight-w class" count):
 **Key findings**:
 - All mainstream codes have 100% weight-1 recovery (single-bit errors
   unambiguous — universal good property).
-- **surface weight-2 recovery = 1/3**: 16.7% of failures from logical
-  equivalence (unavoidable), 50% from stabilizer degeneracy (designable).
-  Surface is structurally *not* a high-correction code by this metric.
+- **Note (260827 erratum)**: the earlier surface w2 = 1/3 figure and
+  "surface is structurally weak" conclusion were based on a non-valid
+  construction (X/Z stabilizers on the same face — not a legal CSS code,
+  4 anticommuting pairs). Withdrawn; the true surface w2 recovery needs an
+  authoritative tool and will be reported when available.
 - HGP LDPC weight-2 recovery rises with code length (58.7% → 87.7%) —
   probabilistic low degeneracy, approaching AG r≥2 by dilution.
 - AG r≥2 is the **only zero-degenerate family** (Theorem 10.30.2.03:
@@ -504,11 +505,10 @@ mismatch only. Numbers above are from `data/sinter_benchmark.csv`
 - **Degeneracy metric**: min-weight decode recovery rate assumes minimum-weight
   decoding; a real decoder that picks a non-minimum representative (or fails
   to pick) will differ. The metric measures the *structural* recovery ceiling.
-- **surface code**: by the geometric-theory degeneracy metric it is a *weak*
-  code (w2 recovery 1/3, structurally bounded by logical equivalence +
-  stabilizer degeneracy) — its practical value lies in engineering (4-body
-  local stabilizers, MWPM efficiency, threshold behavior), which this toolkit
-  does not score.
+- **surface code (260827 erratum)**: the earlier "weak code" conclusion
+  (w2 recovery 1/3) was based on a non-valid construction and is withdrawn.
+  The surface w2 recovery requires an authoritative extraction; no claim is
+  made until verified.
 - **AG p_L numbers**: zero-degeneracy values are theoretical (w < d fully
   recovered by the zero-degeneracy theorem, w ≥ d conservatively counted as
   failure); the stim multi-round AG(4,1) vs surface MWPM comparison is fully

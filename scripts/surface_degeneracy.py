@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""surface_degeneracy.py —— 表面码简并结构分析（几何论方法，正确指标）
+"""[数据作废] surface_degeneracy.py —— 表面码简并结构分析（几何论方法，正确指标）
+
+**260827 数据作废声明**：本脚本的 planar_surface_913_gens 构造（X/Z 稳定子
+同面）不是合法 CSS 码——4 个不对易对（对角面共享角点），k=5 而真 surface
+应 k=1。因此其中 surface [[9,1,3]] 的 w2=33.3% 等数字**全部作废**。
+真 surface code 的 w2 恢复率需权威工具（stim tableau 提取在此环境不可行）
+重算后再补。AG/HGP 数据不受影响（合法码，独立验证）。
+
+保留本文件仅为记录错误构造与教训。
 
 与 ldpc_degeneracy.py 同一分析框架，用"最小权重解码恢复率"（比 fail_rate
 类大小指标更精确：解码器选类中最小权重成员，权重1错误与其共享类的权重2
