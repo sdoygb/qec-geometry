@@ -26,5 +26,6 @@ from .closedform import (ag_params, pg_params, zero_loss_boundary,
                          rm_degeneracy_classes,
                          ag_dminus1_syndrome, QECClosedForm, TRANSVERSAL_GATES)
 from .decoder import LookupDecoder, decode_fail_rate, recovery_class_structure
+from .rm_decoder import moments_of, rm_x_decode, css_rm_x_decode, css_rm_zsupport
 
 __version__ = "0.3.3"

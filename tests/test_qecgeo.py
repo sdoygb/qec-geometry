@@ -412,3 +412,79 @@ class TestBuildFast:
         t0 = time.time(); d2.build_fast(w_max=2); t_new = time.time() - t0
         assert len(d1.table) == len(d2.table)
         assert t_new < t_old / 5, f"加速不足: {t_old:.1f}s → {t_new:.1f}s"
+
+
+class TestRmDecoder:
+    """Reed-Muller 矩解码器（非查表，O(n·poly)）。"""
+
+    def test_r1_decode_all_weights(self):
+        """r=1 解码：错误 ≤ 2 全部恢复，矩一致。"""
+        import random
+        from qecgeo import moments_of, rm_x_decode
+        random.seed(1)
+        for m in (4, 5, 6):
+            n = 1 << m
+            for _ in range(100):
+                w = random.randint(0, 2)
+                A = random.sample(range(n), w)
+                mm = moments_of(A, m, 1)
+                dec = rm_x_decode(mm, m, 1)
+                assert dec is not None
+                assert moments_of(dec, m, 1) == mm
+                assert len(dec) <= 2
+
+    def test_r1_scales_to_1024(self):
+        """r=1 在 n=1024 微秒级（查表不可行的规模）。"""
+        import random, time
+        from qecgeo import moments_of, rm_x_decode
+        random.seed(2)
+        n = 1 << 10
+        t0 = time.time()
+        for _ in range(1000):
+            w = random.randint(0, 2)
+            A = random.sample(range(n), w)
+            dec = rm_x_decode(moments_of(A, 10, 1), 10, 1)
+            assert dec is not None
+        assert (time.time() - t0) < 2.0  # 1000 次 < 2s
+
+    def test_r2_decode(self):
+        """r=2 解码：错误 ≤ 4 全部恢复（m=4/5 枚举可行）。"""
+        import random
+        from qecgeo import moments_of, rm_x_decode
+        random.seed(3)
+        for m in (4, 5):
+            n = 1 << m
+            for _ in range(30):
+                w = random.randint(0, 4)
+                A = random.sample(range(n), w)
+                mm = moments_of(A, m, 2)
+                dec = rm_x_decode(mm, m, 2)
+                assert dec is not None
+                assert moments_of(dec, m, 2) == mm
+                assert len(dec) <= 4
+
+    def test_end_to_end_vs_lookup(self):
+        """CSS(RM(1,m)) 端到端：矩解码与查表解码恢复一致。"""
+        import random
+        from qecgeo import moments_of, rm_x_decode, LookupDecoder
+        from qecgeo.pauli import Pauli
+        random.seed(4)
+        for m in (4, 5):
+            n = 1 << m
+            rows = []
+            for mask in range(1 << m):
+                if mask.bit_count() <= 1:
+                    rows.append([1 if (col & mask) == mask else 0 for col in range(n)])
+            gens = []
+            for row in rows:
+                gens.append(Pauli(n, [1 if b else 0 for b in row]))
+                gens.append(Pauli(n, [2 if b else 0 for b in row]))
+            dec_tbl = LookupDecoder(gens, n, name='t'); dec_tbl.build(w_max=2)
+            for _ in range(50):
+                w = random.randint(0, 2)
+                A = random.sample(range(n), w)
+                E = Pauli(n, [1 if i in A else 0 for i in range(n)])
+                A_rec = rm_x_decode(moments_of(A, m, 1), m, 1)
+                R_mom = Pauli(n, [1 if i in A_rec else 0 for i in range(n)])
+                zero = tuple([0] * len(gens))
+                assert dec_tbl.syndrome_of(E * R_mom) == zero
