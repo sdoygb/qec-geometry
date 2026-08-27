@@ -1,8 +1,13 @@
 """rm_decoder.py —— Reed-Muller 快速解码器（矩恢复，O(n·poly)，非查表）
 
 量子 CSS(RM(r,m)) 的 X 错误解码 ≡ 经典码 RM(m-r-1,m) 的 syndrome 解码：
-  - syndrome = 错误支撑 A（|A| ≤ 2^r）与次数 ≤ r 单项式的点积（"矩"）
+  - syndrome = 错误支撑 A 与次数 ≤ r 单项式的点积（"矩"）
   - 解码目标：从矩恢复最小权重错误 A（= syndrome 类的最小权重代表）
+  - 矩唯一性（260827 复核）：权重 ≤ (d−1)/2 = 2^r − ½ 的错误矩唯一（可纠
+    范围，理论保证）；更大权重在 m 小时碰撞（r=1 的 w=2 对所有 m 大量
+    碰撞——线性矩不足；r=2 且 m<7 的 w=4 ~1% 碰撞）。decode_r1/r2 为
+    【遗留实现】（存在矩不唯一时静默返回错误答案的风险），公开 API
+    rm_x_decode 委托 rm_general_decoder（矩阵查表，见该模块的边界说明）。
 
 与查表解码器（LookupDecoder）的本质区别：
   - 查表：表构建 O(C(n,2)·3^2)，n=1024 需 470 万错误——不可行
@@ -53,7 +58,8 @@ def _check_moments(A, mm, m, r):
 
 
 def decode_r1(mm, m):
-    """r=1：错误 ≤ 2，O(n) 矩读出。"""
+    """[遗留] r=1 矩解码（O(n)）。注意：r=1 的 w=2 矩不唯一（线性矩不足），
+    对碰撞 syndrome 返回首个匹配的 a（可能非真实 A）。公开 API 请用 rm_x_decode。"""
     n = 1 << m
     m0 = mm[()]
     m1 = [mm[(i,)] for i in range(m)]
@@ -77,7 +83,8 @@ def decode_r1(mm, m):
 
 
 def decode_r2(mm, m):
-    """r=2：错误 ≤ 4，矩方程 + 约束枚举。"""
+    """[遗留] r=2 矩解码（约束枚举）。注意：m<7 时 w=4 矩 ~1% 碰撞（超出
+    可纠 (d−1)/2=3），O(n⁴) 兜底仅小码可行。公开 API 请用 rm_x_decode。"""
     n = 1 << m
     m0 = mm[()]
     m1 = [mm[(i,)] for i in range(m)]
