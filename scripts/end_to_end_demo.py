@@ -49,17 +49,17 @@ def css_rm_code(m, r):
 
 
 def build_recovery_arrays(dec, n):
-    """syndrome → 恢复映射为 numpy 索引数组（向量化查表）。
+    """syndrome → 恢复映射（稀疏 dict，向量化查表）。
 
-    返回 (rec_x, rec_z, in_table)：
-      rec_x[K] / rec_z[K] = syndrome 编码为整数 K 时恢复算符的 X/Z 分量位掩码
-      in_table[K] = 该 syndrome 是否在恢复表（可识别）
+    返回 (synd_to_rec, in_table)：
+      synd_to_rec: dict[int(syndrome 编码), (rec_x, rec_z)]——恢复算符 X/Z 分量位掩码
+      in_table: 同上 syndrome 编码 → True（可识别）
+
+    对 ns 大（如 [[64,20,8]] 的 44 稳定子）不可用稠密数组，用稀疏 dict；
+    向量化查表用 np.frompyfunc（命中 O(1)）。
     """
-    ns = len(dec.gens)
-    size = 1 << ns
-    rec_x = np.zeros(size, dtype=np.uint64)
-    rec_z = np.zeros(size, dtype=np.uint64)
-    in_table = np.zeros(size, dtype=bool)
+    synd_to_rec = {}
+    in_table = {}
     for synd, R in dec.table.items():
         k = sum(int(b) << i for i, b in enumerate(synd))
         xmask = zmask = 0
@@ -68,10 +68,9 @@ def build_recovery_arrays(dec, n):
                 xmask |= 1 << i
             if R.t[i] in (2, 3):
                 zmask |= 1 << i
-        rec_x[k] = xmask
-        rec_z[k] = zmask
+        synd_to_rec[k] = (xmask, zmask)
         in_table[k] = True
-    return rec_x, rec_z, in_table
+    return synd_to_rec, in_table
 
 
 def popcount64(x):
@@ -116,7 +115,7 @@ def run_code(m, r, noise_list, shots=100000):
         t0 = time.time()
         dec = LookupDecoder(gens, n, name=f'[[{n},{k},{1 << (r + 1)}]]')
         dec.build(w_max=2)
-        rec_x, rec_z, in_table = build_recovery_arrays(dec, n)
+        synd_to_rec, in_table = build_recovery_arrays(dec, n)
         t_build = (time.time() - t0) * 1000
 
         # 2. 向量化采样错误 + syndrome + 恢复 + 验证
@@ -130,18 +129,23 @@ def run_code(m, r, noise_list, shots=100000):
         Ez = (tz | ty).astype(np.uint64)   # Z 分量
 
         synd = ((Ex.astype(np.int64) @ Sz.T + Ez.astype(np.int64) @ Sx.T) & 1).astype(np.uint64)
-        shifts = np.array([1 << i for i in range(ns)], dtype=np.uint64)
-        idx = (synd.astype(np.uint64) * shifts).sum(axis=1).astype(np.int64)
+        # 编码为整数：ns 大时用 object 数组（Python int 任意精度）
+        idx = np.zeros(shots, dtype=object)
+        for i in range(ns):
+            idx = idx | (synd[:, i].astype(object) << i)
 
         # 错误翻转逻辑 Z：E 的 X 分量与 Lz 支撑交奇数
         flip_E = (Ex * lz_bits).sum(axis=1) & 1
 
-        # 查表恢复（向量化）
-        Rx = rec_x[idx]
-        # 恢复翻转逻辑 Z：R 的 X 分量与 Lz 交奇数
-        flip_R = popcount64(Rx & np.uint64(lz_xmask)) & 1
-        flip_corr = flip_E ^ flip_R
-        resolved = in_table[idx] | (Rx == 0)   # 命中表 或 无错误
+        # 查表恢复（稀疏 dict 向量化；n>64 时位掩码超 uint64 → object 数组）
+        def _lookup(k):
+            return synd_to_rec.get(k, (0, 0))
+        look = np.frompyfunc(_lookup, 1, 1)(idx)
+        Rx = np.array([v[0] for v in look], dtype=object)
+        # 恢复翻转逻辑 Z：R 的 X 分量与 Lz 交奇数（Python 大整数 bit_count）
+        flip_R = np.array([(int(rx) & lz_xmask).bit_count() & 1 for rx in Rx], dtype=np.int64)
+        flip_corr = (flip_E.astype(np.int64) ^ flip_R)
+        resolved = np.array([k in in_table or int(Rx[i]) == 0 for i, k in enumerate(idx)], dtype=bool)
         t_dec = (time.time() - t0) * 1000
 
         # 3. 验证
@@ -171,6 +175,8 @@ def main():
     run_code(4, 1, (0.001, 0.005, 0.01))    # [[16,6,4]]
     run_code(5, 1, (0.001, 0.005))           # [[32,20,4]]
     run_code(6, 1, (0.001, 0.005))           # [[64,50,4]]
+    run_code(7, 1, (0.001, 0.005))           # [[128,112,4]] 大码
+    run_code(6, 2, (0.001, 0.005))           # [[64,20,8]]  d=8 零简并
 
 
 if __name__ == "__main__":
