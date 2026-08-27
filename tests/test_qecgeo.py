@@ -531,3 +531,33 @@ class TestRmDecoderHighR:
         for m in (4, 6, 10):
             z = css_rm_zsupport(m, 1)
             assert len(z) == (1 << (m - 2))
+
+
+class TestHighWeightDecode:
+    """高权重错误（|A| ≥ 5）恢复（MILP 兜底）。"""
+
+    def test_high_weight_m6(self):
+        """m=6 (n=64) r=3：权重 5-8 全部恢复（MILP 兜底）。"""
+        import random
+        from qecgeo import moments_of, rm_x_decode
+        random.seed(12)
+        m, r = 6, 3
+        n = 1 << m
+        for _ in range(5):
+            w = random.randint(5, 8)
+            A = random.sample(range(n), w)
+            mm = moments_of(A, m, r)
+            rec = rm_x_decode(mm, m, r)
+            assert rec == sorted(A)
+
+    def test_high_weight_m7(self):
+        """m=7 (n=128) r=3：权重 8 恢复（MILP 兜底，n≤128 可行）。"""
+        import random
+        from qecgeo import moments_of, rm_x_decode
+        random.seed(13)
+        m, r = 7, 3
+        n = 1 << m
+        A = random.sample(range(n), 8)
+        mm = moments_of(A, m, r)
+        rec = rm_x_decode(mm, m, r)
+        assert rec == sorted(A)

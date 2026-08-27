@@ -124,8 +124,46 @@ class RMMomentDecoder:
                             continue
                         if np.all((rem - self.M_pt[c] - self.M_pt[dp]) % 2 == 0):
                             return sorted({a, b, c, dp})
-        # 高权重（|A| ≥ 8）：未实现快速路径
+        # 高权重（|A| ≥ 5）：MILP 兜底（scipy.milp，最小权重矩方程）
+        # 适用：n ≤ 128 秒级；n=256 的 16 点超时（标注边界）
+        if n <= 128:
+            rec = _milp_decode(mm, m, r, self)
+            if rec is not None:
+                return rec
         return None
+
+
+def _milp_decode(mm, m, r, dec, time_limit=30):
+    """MILP 最小权重解：min Σe s.t. G e ≡ m (mod 2), e ∈ {0,1}^n。
+
+    线性化：G e - 2k = m（k 整数）。scipy.milp 正规求解。
+    适用：n ≤ 128 高权重错误秒级；大 n 超时返回 None。
+    """
+    try:
+        from scipy.optimize import milp, LinearConstraint, Bounds
+        n, K = dec.n, dec.K
+        m_vec = dec._vec(mm)
+        if np.all(m_vec == 0):
+            return []
+        # 矩阵 G：复用预计算的单点矩表（G[t,a] = M_pt[a,t]）
+        G = dec.M_pt.T.astype(int)   # (K, n)
+        nv = n + K
+        c = np.zeros(nv); c[:n] = 1
+        A = np.hstack([G, -2 * np.eye(K, dtype=int)])
+        lc = LinearConstraint(A, lb=m_vec, ub=m_vec)
+        ub = np.ones(nv); ub[n:] = 1e9
+        bounds = Bounds(lb=np.zeros(nv), ub=ub)
+        integrality = np.ones(nv)
+        res = milp(c=c, constraints=lc, integrality=integrality,
+                   bounds=bounds, options={'time_limit': time_limit})
+        if res.success:
+            e = np.round(res.x[:n]).astype(int)
+            A_rec = [i for i in range(n) if e[i]]
+            if moments_of(A_rec, m, r) == mm:
+                return sorted(A_rec)
+    except Exception:
+        pass
+    return None
 
 
 _decoders = {}
