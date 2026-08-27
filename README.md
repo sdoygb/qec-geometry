@@ -106,6 +106,17 @@ Three robust findings:
    geometric-theory prediction: richer sector structure ⇒ more robust A0/A1
    separation.
 3. **Cluster lift is strongest at low noise (3.0×) and plateaus at 1.5×**: the
+
+ 4. **Non-lattice codes (1D coordinates) lose the A0/A1 separation** (NEW,
+    cross-code boundary): on the [[15,7,3]] Hamming CSS code the detector
+    coordinates are 1D, and the crossing/topology criteria become trivial —
+    cross_lift collapses to 1.00× (A0 exc_med = A1 exc_med) vs surface 2.39×.
+    The A0/A1 separation requires ≥2D lattice coordinates; the pipeline now
+    normalizes arbitrary coordinate dimensions and **reports the degeneration
+    honestly** instead of crashing (`_normalize_coords`; see
+    `scripts/cross_code_topology_diagnosis.py`). For LDPC/non-lattice codes,
+    non-topological criteria (syndrome weight / distance) are the appropriate
+    comparators.
    largest excitation cluster of A1 is systematically larger than A0's, but
    cluster separation (1.5–3.0×) is weaker than crossing separation
    (1.8–2.7×) and both decay together with noise — crossing rate is the

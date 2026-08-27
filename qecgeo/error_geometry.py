@@ -114,9 +114,38 @@ def decode_circuit(circuit, shots, seed=None, decoder='pymatching'):
         preds = matching.decode_batch(dets)
         le = np.any(preds != obs, axis=1)
     coords = get_detector_coords(circuit)
+    coords = _normalize_coords(coords)
     return dict(circuit=circuit, dets=dets, obs=obs, preds=preds, le=le,
                 coords=coords, matching=matching, n_det=dets.shape[1],
                 decoder=decoder, dt=time.time() - t0)
+
+
+def _normalize_coords(coords):
+    """任意维度探测器坐标 → 标准 ≥3 维 (x, y, t)，供拓扑分析统一使用。
+
+    跨码族扩展（10.55 延伸）：surface/color 码坐标是 2D 格点 (+ 时间层)；
+    LDPC / 任意稳定子码的坐标可能是 1D（如 [d] 单索引）或 0D（空坐标）。
+    拓扑判据（穿越/边界/配对距离）需要平面结构，这里做确定性映射：
+
+      - 2D+ (len ≥ 2): 原样保留前两维为 (x, y)，第 3 维为时间层（无则补 0）
+      - 1D  (len == 1): 映射为 (x, 0) —— 拓扑退化为线性链（穿越只沿 x）
+      - 0D  (空/缺失): 用探测器索引合成 (i, 0) —— 无几何意义，仅保分析不崩
+
+    返回新的 coords dict（原始对象不改）。1D/0D 映射是**确定性的**（不依赖
+    探测器索引顺序之外的信息），保证跨码族基准可复现。
+    """
+    if coords is None:
+        return None
+    out = {}
+    for k, v in coords.items():
+        v = list(v) if v is not None else []
+        if len(v) >= 2:
+            out[k] = (float(v[0]), float(v[1]), float(v[2]) if len(v) >= 3 else 0.0)
+        elif len(v) == 1:
+            out[k] = (float(v[0]), 0.0, 0.0)          # 1D 线性链
+        else:
+            out[k] = (float(k), 0.0, 0.0)             # 0D 合成索引
+    return out
 
 
 # ---------- 2. 错误模式空间结构分析 ----------

@@ -199,3 +199,93 @@ class TestRmDegeneracyClasses:
         cf = QECClosedForm(6, 2)
         d = cf.degeneracy_classes()
         assert d["n_classes"] == rm_degeneracy_classes(6, 2)["n_classes"]
+
+
+class TestTheta4Suppression:
+    """10.30 开放问题 3：零简并压低 θ⁴ 系数（fail(2) = 0 的直接证据）。"""
+
+    def _unique_ratio(self, m, r):
+        """权重 2 层 syndrome 唯一率（枚举）。"""
+        from itertools import combinations
+        n = 1 << m
+        rows = []
+        for mask in range(1 << m):
+            if mask.bit_count() <= r:
+                rows.append([1 if (col & mask) == mask else 0 for col in range(n)])
+        seen, conflicts = {}, 0
+        for idxs in combinations(range(n), 2):
+            t = [0] * n
+            t[idxs[0]] = t[idxs[1]] = 1
+            s = tuple(sum(ti & gi for ti, gi in zip(t, g)) & 1 for g in rows)
+            if s in seen:
+                conflicts += 1
+            else:
+                seen[s] = idxs
+        return 1.0 - conflicts / (n * (n - 1) // 2)
+
+    def test_r2_weight2_zero_degeneracy(self):
+        """AG r≥2 权重 2 层 syndrome 完全唯一 → fail(2) = 0（θ⁴ 项压低）。"""
+        assert self._unique_ratio(5, 2) == 1.0
+        assert self._unique_ratio(6, 2) == 1.0
+
+    def test_r1_weight2_ratio(self):
+        """AG r=1 唯一率 = 2^{1-m}（fail(2) = 1 − 2^{1−m}）。"""
+        for m in (4, 5, 6):
+            ur = self._unique_ratio(m, 1)
+            assert abs(ur - 2 ** (1 - m)) < 1e-9
+
+    def test_family_fail_spectrum(self):
+        """10.35 定理 10.35.1.02 家族失败率谱系：r 增 fail 单调降。"""
+        from qecgeo import ag_params
+        f1 = ag_params(10, 1)["fail"]
+        f2 = ag_params(10, 2)["fail"]
+        f3 = ag_params(10, 3)["fail"]
+        assert f1 > f2 > f3
+        assert f1 > 0.99          # r=1 全简并 fail → 1
+        assert abs(f2 - 0.5) < 0.01
+        assert abs(f3 - 0.5) < 0.01
+
+
+class TestCrossCodeNormalization:
+    """跨码族坐标归一化（_normalize_coords）：1D/0D → 标准 3 维。"""
+
+    def _norm(self):
+        from qecgeo import error_geometry as eg
+        return eg._normalize_coords
+
+    def test_2d_preserved(self):
+        """2D+ 坐标原样保留（surface/color 不变）。"""
+        n = self._norm()
+        coords = {0: [1.5, 2.5, 3], 1: [0.0, 0.0, 1]}
+        out = n(coords)
+        assert out[0] == (1.5, 2.5, 3.0)
+        assert out[1] == (0.0, 0.0, 1.0)
+
+    def test_1d_becomes_linear_chain(self):
+        """1D 坐标 → (x, 0, 0)：拓扑退化为线性链。"""
+        n = self._norm()
+        coords = {0: [0.0], 1: [1.0], 2: [2.0]}
+        out = n(coords)
+        assert out[0] == (0.0, 0.0, 0.0)
+        assert out[1] == (1.0, 0.0, 0.0)
+        assert out[2] == (2.0, 0.0, 0.0)
+
+    def test_0d_synthetic_index(self):
+        """0D/空坐标 → 合成索引 (i, 0, 0)。"""
+        n = self._norm()
+        out = n({5: [], 7: None})
+        assert out[5] == (5.0, 0.0, 0.0)
+        assert out[7] == (7.0, 0.0, 0.0)
+
+    def test_none_passthrough(self):
+        """None 坐标原样返回（无坐标电路不崩）。"""
+        n = self._norm()
+        assert n(None) is None
+
+    def test_all_outputs_3d(self):
+        """所有输出坐标恒 ≥3 维（analyze_edges 的 round(v[0]),round(v[1]) 安全）。"""
+        n = self._norm()
+        for coords in ({0: [1.0]}, {0: [1.0, 2.0]}, {0: [1.0, 2.0, 3.0, 4.0]}, {0: []}):
+            out = n(coords)
+            for v in out.values():
+                assert len(v) >= 3, f"{coords} → {v}"
