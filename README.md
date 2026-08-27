@@ -453,6 +453,35 @@ random X-stabilizer measurements (|0⟩ is not an X eigenstate), so rounds=2
 reference + differential detectors are required (noise-free → all-zero
 detectors ✓); differential extraction recovers the standard RM generators ✓;
 measurement noise correctly raises p_L after the syndrome bit-vector fix ✓.
+
+**Complete spatiotemporal SCL decoding** (`scripts/ag_spatiotemporal_scl.py`,
+260828): differential detectors only see d_t = H·e_t ⊕ m_t ⊕ m_{t-1} — the
+data error e_t appears once (round t), the measurement error m_t appears twice
+(rounds t and t+1). A decoder that only uses the last differential (old
+pipeline) silently drops all intermediate-round data errors. The complete
+pipeline iterates: per-round SCL moment decode (data errors) → residual
+d_t ⊕ H·ê_t ≈ m_t ⊕ m_{t-1} → 1D repetition-code time-chain decode of the
+measurement errors (per-stabilizer independent, m[t] = m[0] ⊕ Σ d, min-weight
+over m[0]∈{0,1}) → subtract → re-SCL:
+
+| code | condition | old (last-diff only) | complete SCL | gain |
+|---|---|---|---|---|
+| **AG(6,2) [[64,20,8]]** | p=0.001, p_meas=0, r=3 | 0.0085 | **0.00000** (0/2000) | ∞ |
+| AG(6,2) | p=0.001, p_meas=0, r=5 | — | **0.00000** (0/2000) | ∞ |
+| AG(6,2) | p=0.001, p_meas=0.001, r=5 | — | **0.0010** | 8.5× |
+| **AG(4,1) [[16,6,4]]** | p=0.01, p_meas=0, r=3 | 0.0575* | **0.0057** | 10× |
+| AG(4,1) | p=0.01, p_meas=0.01, r=4 | 0.075 | **0.0128** | 5.9× |
+
+(*old 0.0575 = last-diff-only baseline after the commutation fix; 0.0085 was
+the CNOT-decomposition gate-level number, superseded by the MQ model.)
+Implementation notes: detectors must be appended immediately after each round's
+MR (rec is relative to the append point; a delayed append makes every detector
+identically zero); X-stabilizer measurements detect Z-type errors and
+vice-versa (commutation, not label); time-chain decode is the prefix-sum
+m[t]=m[0]⊕Σ_{i<t}d[i] with min-weight choice of m[0]. Known boundary: the
+r=2 general-4-point fallback is O(n⁴) and makes p_meas=0.01 sweeps slow on
+AG(6,2) (4-point candidates dominate when measurement noise corrupts moments).
+
 **sinter.Decoder integration (complete)** — the custom-decoder interface lives
 in **sinter** (bundled with stim 1.16), not stim itself. `LookupSinterDecoder`
 (`scripts/sinter_lookup_decoder.py`) wraps the lookup decoder as a
