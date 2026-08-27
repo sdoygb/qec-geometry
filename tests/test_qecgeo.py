@@ -361,3 +361,54 @@ class TestLookupDecoder:
         t0 = time.time()
         dec.build(w_max=2)
         assert (time.time() - t0) < 1.0  # 远小于 1 秒
+
+
+class TestBuildFast:
+    """向量化恢复表构建（build_fast vs build 等价）。"""
+
+    def test_equivalence_small(self):
+        """[[15,7,3]] build_fast 与 build 表完全一致。"""
+        from qecgeo import LookupDecoder
+        from qecgeo.codes import rm_code_15_7_3
+        code = rm_code_15_7_3()
+        d1 = LookupDecoder(code.gens, code.n, name='t'); d1.build(w_max=2)
+        d2 = LookupDecoder(code.gens, code.n, name='t'); d2.build_fast(w_max=2)
+        assert len(d1.table) == len(d2.table)
+        for k, v in d2.table.items():
+            assert d1.table[k] == v
+
+    def test_fail_rate_after_fast(self):
+        """build_fast 后 fail_rate/class_structure 可用且一致。"""
+        from qecgeo import LookupDecoder
+        from qecgeo.codes import rm_code_15_7_3
+        code = rm_code_15_7_3()
+        d1 = LookupDecoder(code.gens, code.n, name='t'); d1.build(w_max=2)
+        d2 = LookupDecoder(code.gens, code.n, name='t'); d2.build_fast(w_max=2)
+        assert abs(d2.fail_rate(2) - d1.fail_rate(2)) < 1e-12
+        assert d2.class_structure()['classes'] == d1.class_structure()['classes']
+
+    def test_fast_speedup(self):
+        """build_fast 显著快于 build（>5×，Mac 秒级）。"""
+        from qecgeo import LookupDecoder
+        from qecgeo.pauli import Pauli
+        import time
+
+        def css_rm_gens(m, r):
+            n = 1 << m
+            rows = []
+            for mask in range(1 << m):
+                if mask.bit_count() <= r:
+                    rows.append([1 if (col & mask) == mask else 0 for col in range(n)])
+            gens = []
+            for row in rows:
+                gens.append(Pauli(n, [1 if b else 0 for b in row]))
+                gens.append(Pauli(n, [2 if b else 0 for b in row]))
+            return gens, n
+
+        gens, n = css_rm_gens(6, 2)   # [[64,20,8]]
+        d1 = LookupDecoder(gens, n, name='t')
+        t0 = time.time(); d1.build(w_max=2); t_old = time.time() - t0
+        d2 = LookupDecoder(gens, n, name='t')
+        t0 = time.time(); d2.build_fast(w_max=2); t_new = time.time() - t0
+        assert len(d1.table) == len(d2.table)
+        assert t_new < t_old / 5, f"加速不足: {t_old:.1f}s → {t_new:.1f}s"

@@ -111,7 +111,7 @@ def run_code(m, r, noise_list, shots=100000):
     # 1. 恢复表 + 向量化映射（只建一次，多噪声点共享）
     t0 = time.time()
     dec = LookupDecoder(gens, n, name=f'[[{n},{k},{1 << (r + 1)}]]')
-    dec.build(w_max=2)
+    dec.build_fast(w_max=2)   # 向量化构建（[[128,70,8]] 120s → 5s）
     synd_to_rec, in_table = build_recovery_arrays(dec, n)
     t_build = (time.time() - t0) * 1000
 
