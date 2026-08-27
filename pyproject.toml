@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qec-geometry"
-version = "0.3.1"
+version = "0.3.2"
 description = "Geometric diagnostics for quantum error correction codes: A0/A1 error-pattern topology + threshold closed form + anyon typing"
 readme = "README.md"
 license = { text = "MIT" }
