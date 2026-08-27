@@ -289,3 +289,75 @@ class TestCrossCodeNormalization:
             out = n(coords)
             for v in out.values():
                 assert len(v) >= 3, f"{coords} → {v}"
+
+
+class TestLookupDecoder:
+    """自研查表解码器 + 几何论恢复表（qecgeo.decoder）。"""
+
+    def _rm_gens(self, m, r):
+        from qecgeo.pauli import Pauli
+        n = 1 << m
+        rows = []
+        for mask in range(1 << m):
+            if mask.bit_count() <= r:
+                rows.append([1 if (col & mask) == mask else 0 for col in range(n)])
+        gens = []
+        for row in rows:
+            gens.append(Pauli(n, [1 if b else 0 for b in row]))
+            gens.append(Pauli(n, [2 if b else 0 for b in row]))
+        return gens
+
+    def test_small_code_correctness(self):
+        """[[5,1,3]]/[[7,1,3]]/[[15,7,3]] 全部枚举错误恢复成功（权重 ≤ 2）。"""
+        from qecgeo import LookupDecoder
+        from qecgeo.codes import five_qubit_code, steane_code, rm_code_15_7_3
+        from itertools import combinations, product
+        from qecgeo.pauli import Pauli
+        for code in (five_qubit_code(), steane_code(), rm_code_15_7_3()):
+            dec = LookupDecoder(code.gens, code.n, name=code.name)
+            dec.build(w_max=2)
+            ok = fail = 0
+            for w in (1, 2):
+                for idxs in combinations(range(code.n), w):
+                    for types in product((1, 2, 3), repeat=w):
+                        t = [0] * code.n
+                        for idx, ty in zip(idxs, types):
+                            t[idx] = ty
+                        success, _ = dec.correct(Pauli(code.n, t))
+                        ok += success
+                        fail += (not success)
+            # d=3 码：权重 1,2 全部可纠（无简并跨层冲突）→ fail = 0
+            assert fail == 0, f"{code.name}: {fail} 个解码失败"
+            assert ok > 0
+
+    def test_ag_r2_weight2_zero_degeneracy(self):
+        """AG r=2 权重 2 层零简并：唯一率 1.0、fail(2)=0、类数=错误数。"""
+        from qecgeo import LookupDecoder
+        dec = LookupDecoder(self._rm_gens(5, 2), 32, name='AG r=2 m=5')
+        dec.build(w_max=2)
+        assert dec.weight2_uniqueness() == 1.0
+        assert dec.fail_rate(2) == 0.0
+        n_w2 = sum(1 for s, ms in dec._classes.items()
+                   if all(E.weight() == 2 for E in ms))
+        assert n_w2 == 9 * (32 * 31 // 2)
+
+    def test_ag_r1_fail2_closed_form(self):
+        """AG r=1 权重 2 fail(2) = 1/3 − 1/(3·2^{m−1})（新闭式，解码器发现）。"""
+        from qecgeo import LookupDecoder
+        for m in (4, 5):
+            dec = LookupDecoder(self._rm_gens(m, 1), 1 << m, name=f'AG r=1 m={m}')
+            dec.build(w_max=2)
+            fr = dec.fail_rate(2)
+            closed = 1 / 3 - 1 / (3 * 2 ** (m - 1))
+            assert abs(fr - closed) < 1e-12, f"m={m}: {fr} vs {closed}"
+
+    def test_build_speed(self):
+        """小码查表构建毫秒级（一台 Mac 的实时可用性）。"""
+        from qecgeo import LookupDecoder
+        from qecgeo.codes import rm_code_15_7_3
+        import time
+        code = rm_code_15_7_3()
+        dec = LookupDecoder(code.gens, code.n, name=code.name)
+        t0 = time.time()
+        dec.build(w_max=2)
+        assert (time.time() - t0) < 1.0  # 远小于 1 秒

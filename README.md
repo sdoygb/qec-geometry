@@ -318,12 +318,51 @@ rm_degeneracy_classes(8, 3)   # ratio 1.007e-4  (matches 10.32 closed form)
   (`scripts/verify_degeneracy_classes.py`); all member counts + ratios
   conserved up to RM(8,4).
 
+### 10. Self-contained lookup decoder + geometric recovery table (NEW)
+
+A decoder **written by us** — no stim/pymatching dependency — that closes the
+"execute" loop on a laptop: build a syndrome→recovery table by enumerating all
+errors up to weight `w_max`, recovering with the minimum-weight representative
+of each syndrome class (`qecgeo.decoder.LookupDecoder`).
+
+```python
+from qecgeo import LookupDecoder
+from qecgeo.codes import steane_code
+
+code = steane_code()
+dec = LookupDecoder(code.gens, code.n, name=code.name)
+dec.build(w_max=2)                 # 63 syndromes, ~3 ms on a Mac
+dec.decode(code.syndrome_of(some_error))   # → recovery Pauli (O(1) lookup)
+dec.fail_rate(2)                   # decoding failure rate at weight 2
+dec.weight2_uniqueness()           # 1.0 = zero-degeneracy layer
+```
+
+**Design = geometric recovery table** (10.30/10.35): recovery representative =
+minimum weight in the syndrome class; decoding fails ⟺ residual ∉ stabilizer
+group = logical error. Class structure = the degeneracy classes of Theorem
+10.30.2.05.
+
+**New closed form discovered by the decoder**: for AG r=1, weight-2 degeneracy
+ratio is exactly **1/3** (m-independent), class size `2^{m−1}`, hence
+`fail(2) = 1/3 − 1/(3·2^{m−1})` (verified m = 4, 5 by enumeration). For AG r≥2
+the weight-2 layer is zero-degenerate: uniqueness 1.0, fail(2) = 0, class count
+= error count (C(32,2)·9 = 4464 for [[32,·,8]]).
+
+Verified: [[5,1,3]]/[[7,1,3]]/[[15,7,3]]/[[16,6,4]] all enumerated errors
+recover successfully (weights 1–2); fail spectrum matches 10.35 Thm 1.02
+(`scripts/verify_lookup_decoder.py`).
+
 ## Honest limitations
 
 - The A0/A1 geometric separation is a **sub-threshold phenomenon**: at noise
   above threshold the error patterns lose structure and the distinction
   vanishes. It is a diagnostic of the *decoding error topology*, not a decoder
   itself.
+- The `LookupDecoder` enumerates errors up to a chosen weight; it is optimal
+  (minimum-weight recovery) **within that weight range** but does not handle
+  weights above `w_max` (use MWPM for those). Table size grows as
+  `Σ_w C(n,w)·3^w` — practical for small/medium codes, not for
+  hundreds-of-qubits LDPC.
 - Threshold closed form is a **single-round, memoryless optimal-decoding model**
   — it does not capture circuit-level noise correlations or multi-round
   propagation. Real circuit thresholds differ (typically lower).
