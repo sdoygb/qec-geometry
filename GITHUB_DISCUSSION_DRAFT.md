@@ -42,8 +42,8 @@ request.
 Best,
 Ouyang Guobin
 (Geometric Theory of QEC; zero-dependency core at
-https://github.com/sdoygb/conjugate-spectral-geometry, article 10.84 has the
-full write-up)
+https://github.com/sdoygb/conjugate-spectral-geometry — the theory write-up
+is in the articles/ directory of that repository)
 
 ---
 

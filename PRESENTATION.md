@@ -59,13 +59,13 @@ syndromes, built by enumerating errors up to weight 2.
 The lookup decoder and the code family are documented in a knowledge library
 (Chinese, with formulas):
 
-- Article 10.30 — AG complete-code family `[[2^m, k, 2^{r+1}]]`, syndrome-class
-  structure (full classification: r-flat classes and (r+1)-affine classes)
-- Article 10.83 — the decoder: syndrome → minimum-weight recovery, failure-rate
-  closed form
-- Article 10.84 — this benchmark and the cross-code analysis
-- Articles 10.35, 10.44 — loss-scaling closed form `loss(θ) = c_d·θ^d`,
-  threshold closed form `p_th = 1/(η·C(n,2))`
+- AG complete-code family `[[2^m, k, 2^{r+1}]]` (CSS(RM(r,m))): construction,
+  distance closed form, and full syndrome-class structure (r-flat classes and
+  (r+1)-affine classes)
+- The decoder: syndrome → minimum-weight recovery table, failure-rate closed form
+- This benchmark and the cross-code degeneracy analysis
+- Loss-scaling closed form `loss(θ) = c_d·θ^d`, threshold closed form
+  `p_th = 1/(η·C(n,2))`
 
 All scripts: `scripts/*.py`, all tests: `pytest tests/` (47 passed).
 
