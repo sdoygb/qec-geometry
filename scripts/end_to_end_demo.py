@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""end_to_end_demo.py —— 一台 Mac 执行纠错：完整端到端演示（10.83，v2）
+"""end_to_end_demo.py —— 一台 Mac 执行纠错：完整端到端演示（10.83，v3）
 
-v2 两个改进（相对 v1）：
+v3 改进：向量化解码循环（相对 v2 的 3.9s/100k shots 纯 Python 循环）。
+  - syndrome 计算：numpy 位运算批量（错误矩阵 × 稳定子矩阵 mod 2）
+  - 查表：syndrome → 恢复的映射预构建为 numpy 索引数组（O(1) 向量化）
+  - 逻辑翻转：X 分量与逻辑 Z 支撑的交按位与 + popcount
+
+v2 改进（保留）：
   [A] 真正应用恢复操作并重算逻辑值——从"检测"升级为"纠错"验证
-  [B] 码升级到 [[16,6,4]]（CSS(RM(1,4))，d=4）——权重 2 错误混合型全部
-      唯一（10.83 定理 10.83.1.01），恢复表 w_max=2 覆盖更多可纠错误
+  [B] 码升级到 [[16,6,4]]（CSS(RM(1,4))，d=4）
 
 模拟方式（码容量，诚实标注）：stim 的 detector_sampler 把显式 `X` 门当作
 "预期操作"吸收进测量基（不触发探测器），故本 demo 不依赖 stim 探测器采样，
-而用**自洽的码容量模拟**：随机注入 Pauli 错误 → `dec.syndrome_of` 计算
-syndrome（模拟"量子硬件读出"）→ 查表恢复 → 应用恢复 → 重算逻辑值。
-stabilizer 模拟器（stim.TableauSimulator）可用于独立验证恢复正确性。
+而用自洽的码容量模拟：随机注入 Pauli 错误 → syndrome（模拟量子硬件读出）
+→ 查表恢复 → 应用恢复 → 重算逻辑值。
 
 闭环：注入错误 → syndrome → 自研解码器查表 → 应用恢复 → 验证 p_L。
 
@@ -19,7 +22,6 @@ stabilizer 模拟器（stim.TableauSimulator）可用于独立验证恢复正确
 import os
 import sys
 import time
-from random import Random
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -50,59 +52,106 @@ def css_rm_code(m, r):
     return gens, lz
 
 
-def sample_error(n, p, rng):
-    """码容量噪声：每比特独立 p 概率的 X/Z/Y 错误。返回组合 Pauli。"""
-    t = [0] * n
-    for j in range(n):
-        if rng.random() < p:
-            t[j] = rng.choice((1, 2, 3))
-    return Pauli(n, t)
+def build_recovery_arrays(dec, n):
+    """syndrome → 恢复映射为 numpy 索引数组（向量化查表）。
+
+    返回 (rec_idx, in_table)：
+      rec_idx[K] = syndrome 编码为整数 K 时恢复算符的索引（0 = 无恢复）
+      in_table[K] = 该 syndrome 是否在恢复表（可识别）
+    """
+    ns = len(dec.gens)
+    size = 1 << ns
+    rec_idx = np.zeros(size, dtype=np.int64)
+    in_table = np.zeros(size, dtype=bool)
+    for synd, R in dec.table.items():
+        k = sum(int(b) << i for i, b in enumerate(synd))
+        # 恢复算符索引：把 Pauli 编码为单个整数（X 分量位掩码 + Z 分量位掩码）
+        xmask = zmask = 0
+        for i in range(n):
+            if R.t[i] in (1, 3):
+                xmask |= 1 << i
+            if R.t[i] in (2, 3):
+                zmask |= 1 << i
+        rec_idx[k] = (xmask << n) | zmask
+        in_table[k] = True
+    return rec_idx, in_table
+
+
+def popcount64(x):
+    """向量化 popcount（numpy int64 数组）。"""
+    x = x.astype(np.uint64)
+    x = x - ((x >> 1) & 0x5555555555555555)
+    x = (x & 0x3333333333333333) + ((x >> 2) & 0x3333333333333333)
+    x = (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0F
+    return (x * 0x0101010101010101) >> 56
 
 
 def main():
     print("=" * 80)
-    print("一台 Mac 执行纠错 v2：注入错误 → syndrome → 自研解码器 → 恢复 → 验证")
+    print("一台 Mac 执行纠错 v3：注入错误 → syndrome → 自研解码器 → 恢复 → 验证")
     print("=" * 80)
     m, r = 4, 1
     gens, lz = css_rm_code(m, r)
     n = 1 << m
-    lz_support = set(i for i in range(n) if lz.t[i] == 2)
-    print(f"码: CSS(RM(1,4)) = [[{n},{n - len(gens)},{1 << (r + 1)}]] "
+    ns = len(gens)
+    # 逻辑 Z 支撑位掩码（X 分量与 Lz 交 → 翻转）
+    lz_xmask = 0
+    for i in range(n):
+        if lz.t[i] == 2:
+            lz_xmask |= 1 << i
+    lz_bits = np.array([1 if (lz_xmask >> i) & 1 else 0 for i in range(n)], dtype=np.uint64)
+    print(f"码: CSS(RM(1,4)) = [[{n},{n - ns},{1 << (r + 1)}]] "
           f"(d=4, 逻辑 Z = x1x2 权重 {lz.weight()})")
+
+    # 稳定子矩阵（向量化 syndrome）
+    Sx = np.zeros((ns, n), dtype=np.int8)   # 稳定子的 X 分量
+    Sz = np.zeros((ns, n), dtype=np.int8)   # 稳定子的 Z 分量
+    for a, g in enumerate(gens):
+        for i in range(n):
+            if g.t[i] in (1, 3):
+                Sx[a, i] = 1
+            if g.t[i] in (2, 3):
+                Sz[a, i] = 1
 
     for p in (0.001, 0.005, 0.01):
         shots = 100000
-        rng = Random(42)
+        pe = p / 3   # X/Z/Y 各 p/3 → 总错误率 p（与 v2 对齐可比）
 
-        # 1. 恢复表（几何论恢复表设计）
+        # 1. 恢复表 + 向量化映射
         t0 = time.time()
         dec = LookupDecoder(gens, n, name='[[16,6,4]]')
         dec.build(w_max=2)
+        rec_idx, in_table = build_recovery_arrays(dec, n)
         t_build = (time.time() - t0) * 1000
 
-        # 2. 模拟 shots 次：注入错误 → syndrome（模拟量子硬件读出）
+        # 2. 向量化采样错误 + syndrome + 恢复 + 验证
         t0 = time.time()
-        flip_E = np.zeros(shots, dtype=int)    # 错误本身翻转逻辑 Z
-        flip_corr = np.zeros(shots, dtype=int) # 纠错后逻辑值
-        resolved = np.zeros(shots, dtype=bool) # syndrome 可识别（恢复成功）
-        for s in range(shots):
-            E = sample_error(n, p, rng)
-            synd = dec.syndrome_of(E)
-            # 错误翻转逻辑 Z ⟺ E 的 X 分量与 Lz 支撑交奇数
-            ex = set(i for i in range(n) if E.t[i] in (1, 3))
-            flip_E[s] = len(ex & lz_support) % 2
-            # 查表恢复（最小权重代表）
-            R = dec.decode(synd)
-            if R.weight() == 0:
-                # 无错误（syndrome 0）：不恢复
-                flip_corr[s] = flip_E[s]
-                resolved[s] = True
-            else:
-                # 应用恢复：纠错后逻辑值 = E 翻转 ⊕ R 翻转（R 正确则 = 0）
-                rx = set(i for i in range(n) if R.t[i] in (1, 3))
-                flip_R = len(rx & lz_support) % 2
-                flip_corr[s] = flip_E[s] ^ flip_R
-                resolved[s] = synd in dec.table
+        rng = np.random.default_rng(42)
+        r = rng.random((shots, n))
+        # 每比特: X/Z/Y 各 pe = p/3 概率（退极化，总错误率 p）
+        tx = (r < pe).astype(np.int8)
+        tz = ((r >= pe) & (r < 2 * pe)).astype(np.int8)
+        ty = ((r >= 2 * pe) & (r < 3 * pe)).astype(np.int8)
+        Ex = (tx | ty).astype(np.uint64)   # X 分量
+        Ez = (tz | ty).astype(np.uint64)   # Z 分量
+
+        # syndrome = (Ex @ Sz^T + Ez @ Sx^T) mod 2（X 错误 vs Z 稳定子 + Z 错误 vs X 稳定子）
+        synd = ((Ex.astype(np.int64) @ Sz.T + Ez.astype(np.int64) @ Sx.T) & 1).astype(np.uint64)
+        # 编码为整数索引（向量化查表）
+        shifts = np.array([1 << i for i in range(ns)], dtype=np.uint64)
+        idx = (synd.astype(np.uint64) * shifts).sum(axis=1).astype(np.int64)
+
+        # 错误翻转逻辑 Z：E 的 X 分量与 Lz 支撑交奇数（逐位乘 + sum mod 2）
+        flip_E = (Ex * lz_bits).sum(axis=1) & 1
+
+        # 查表恢复（向量化）
+        R_enc = rec_idx[idx]                    # 恢复算符编码（0 = 无）
+        xmask_rec = (R_enc >> n).astype(np.uint64)
+        # 恢复翻转逻辑 Z：R 的 X 分量与 Lz 交奇数
+        flip_R = popcount64(xmask_rec & np.uint64(lz_xmask)) & 1
+        # 纠错后逻辑值
+        flip_corr = flip_E ^ flip_R
+        resolved = in_table[idx] | (R_enc == 0)  # 命中表 或 无错误
         t_dec = (time.time() - t0) * 1000
 
         # 3. 验证
