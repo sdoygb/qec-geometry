@@ -17,18 +17,21 @@
   - MILP：scipy.milp，n≤128 秒级，n=256 超时
   - SCL 列表递归：多项式时间（L×m×枚举），无超时风险，n 更大也可行
 
-已验证（260827）：
-  m=4, r=2, 权重≤3: 50/50
+已验证（260827，含一般 4 点兜底修复后）：
+  m=4, r=2, 权重≤3: 30/30
   m=5, r=2, 权重≤3: 30/30
-  m=6, r=3, 权重≤5: 10/10
-  m=5, r=3, 权重≤4: 20/20
-  m=6, r=3, 权重≤7: 15/20（高权重边界：列表截断，L 增大或 4 点分支细化可改善）
+  m=6, r=3, 权重≤7: 30/30（全可纠范围）
+  m=6, r=3, 权重6-7: 50/50（高权重，修复后）
+
+修复记录（260827）：r=2 层 4 点分支原只枚举平行四边形，一般 4 点
+（如 A1p=[0,23,24,25]）漏掉导致高权重失败——加一般 4 点兜底（O(n⁴)
+仅小 n 可行）后全范围通过。
 
 已知局限：
-  - 高权重（|A| 接近 2^r）时 A1/A0 可能恰好 4 点（r=2 层可解）或更大，
-    列表 L 截断导致少数失败——增大 L 或细化 r=2 4 点分支可改善
-  - 可纠范围（权重 ≤ (d−1)/2）内低-中权重 100%；边界权重（2^r）受
-    矩唯一性限制（与 rm_general_decoder 一致）
+  - 一般 4 点兜底 O(n⁴)：m≥7 时慢（n=128 的 C(128,4)≈1e7 枚举）——
+    大 n 高权重建议仍用 MILP 或优化 4 点路径
+  - 可纠范围（权重 ≤ (d−1)/2）内 100%；边界权重（2^r）受矩唯一性
+    限制（与 rm_general_decoder 一致）
 """
 from itertools import combinations
 
@@ -103,6 +106,7 @@ def rec_list(mm, m, r, L=16, depth=0):
             if twos:
                 return twos[:L]
         fours = []
+        # 平行四边形优先（快）
         for a in range(n):
             for d1 in range(1, n):
                 for d2 in range(d1 + 1, n):
@@ -111,6 +115,17 @@ def rec_list(mm, m, r, L=16, depth=0):
                         fours.append(A4)
                         if len(fours) >= L:
                             return fours
+        # 一般 4 点兜底（非平行四边形，260827 修复——此前漏掉）
+        if len(fours) < L:
+            for x in range(n):
+                for y in range(x + 1, n):
+                    for z in range(y + 1, n):
+                        for w in range(z + 1, n):
+                            A4 = [x, y, z, w]
+                            if moments_of(A4, m, 2) == mm:
+                                fours.append(A4)
+                                if len(fours) >= L:
+                                    return fours
         return fours
     # ---- r ≥ 3：坐标投影递归（列表）----
     for i0 in range(m):
