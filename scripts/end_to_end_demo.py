@@ -108,15 +108,15 @@ def run_code(m, r, noise_list, shots=100000):
             if g.t[i] in (2, 3):
                 Sz[a, i] = 1
 
+    # 1. 恢复表 + 向量化映射（只建一次，多噪声点共享）
+    t0 = time.time()
+    dec = LookupDecoder(gens, n, name=f'[[{n},{k},{1 << (r + 1)}]]')
+    dec.build(w_max=2)
+    synd_to_rec, in_table = build_recovery_arrays(dec, n)
+    t_build = (time.time() - t0) * 1000
+
     for p in noise_list:
         pe = p / 3   # X/Z/Y 各 p/3 → 总错误率 p（退极化）
-
-        # 1. 恢复表 + 向量化映射
-        t0 = time.time()
-        dec = LookupDecoder(gens, n, name=f'[[{n},{k},{1 << (r + 1)}]]')
-        dec.build(w_max=2)
-        synd_to_rec, in_table = build_recovery_arrays(dec, n)
-        t_build = (time.time() - t0) * 1000
 
         # 2. 向量化采样错误 + syndrome + 恢复 + 验证
         t0 = time.time()
@@ -177,6 +177,7 @@ def main():
     run_code(6, 1, (0.001, 0.005))           # [[64,50,4]]
     run_code(7, 1, (0.001, 0.005))           # [[128,112,4]] 大码
     run_code(6, 2, (0.001, 0.005))           # [[64,20,8]]  d=8 零简并
+    run_code(7, 2, (0.001, 0.005))           # [[128,70,8]]  d=8 更大零简并
 
 
 if __name__ == "__main__":
