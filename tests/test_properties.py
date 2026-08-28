@@ -282,6 +282,9 @@ class TestSCLDecoder(unittest.TestCase):
         self.assertLess(dt, 30.0, f"m=7 代数 4 点过慢: {dt:.1f}s (>30s)")
 
 
+from qecgeo.moment_algebra import correct_polluted, solve_two
+
+
 class TestMomentAlgebra(unittest.TestCase):
     """矩代数约束（10.85）：M2 = Σ v_a v_aᵀ 分解、秩约束、两点解析解。
 
@@ -356,9 +359,24 @@ class TestMomentAlgebra(unittest.TestCase):
             mm = moments_of(list(A), m, 2)
             m1 = self._m1_vec(mm, m)
             M2 = self._m2_mat(mm, m)
-            sols = _solve_two_analytic(m1, M2, m)
+            sols = solve_two(m1, M2, m)
             self.assertTrue(any(s == sorted(A) for s in sols),
                             f"两点 A={A}: 解析解未命中")
+
+    def test_three_point_analytic(self):
+        """三点解析解（10.85 §6 开放问题）：有解时正确 100%。
+        覆盖率 ~9%（跨 i 一致性约束待推导）——非交付标准。"""
+        from qecgeo import moments_of
+        from qecgeo.moment_algebra import solve_three, m1_vec, m2_mat
+        m = 5
+        n = 1 << m
+        rng = random.Random(17)
+        for A in rng.sample(list(combinations(range(n), 3)), 200):
+            mm = moments_of(list(A), m, 2)
+            sols = solve_three(m1_vec(mm, m), m2_mat(mm, m), m)
+            if sols:
+                self.assertTrue(any(s == sorted(A) for s in sols),
+                                f"三点 A={A}: 解析解有解但错误")
 
     def test_two_point_pollution_correction(self):
         """算法 10.85.4.01: 两点 + 1/2 位污染，代数纠正 100%。"""
@@ -373,7 +391,7 @@ class TestMomentAlgebra(unittest.TestCase):
             keys = list(mm.keys())
             for fk in keys:
                 mm2 = dict(mm); mm2[fk] ^= 1
-                hits = _correct_polluted(mm2, m, 2)
+                hits = correct_polluted(mm2, m, 2, w=2)
                 tot1 += 1
                 if any(sorted(s) == sorted(A) for _, sols in hits for s in sols):
                     ok1 += 1
@@ -387,7 +405,7 @@ class TestMomentAlgebra(unittest.TestCase):
                 for fj in range(fi + 1, min(6, len(keys))):
                     mm2 = dict(mm)
                     mm2[keys[fi]] ^= 1; mm2[keys[fj]] ^= 1
-                    hits = _correct_polluted(mm2, m, 2)
+                    hits = correct_polluted(mm2, m, 2, w=2)
                     tot2 += 1
                     if any(sorted(s) == sorted(A) for _, sols in hits for s in sols):
                         ok2 += 1
@@ -395,71 +413,3 @@ class TestMomentAlgebra(unittest.TestCase):
         # 其他两点错误；但无解（需>2位翻转）为 0，纠正率 >60%。
         self.assertGreater(ok2 / max(tot2, 1), 0.60,
                            f"两点 2 位污染纠正率过低 {ok2}/{tot2}")
-
-
-def _solve_two_analytic(m1, M2, m):
-    """两点错误解析解（定理 10.85.3.01），供测试用。"""
-    from qecgeo import moments_of
-    d = m1
-    if not d.any():
-        return []
-    jstar = int(np.nonzero(d)[0][0])
-    sols = []
-    for t in (0, 1):
-        va = np.zeros(m, dtype=int)
-        vb = np.zeros(m, dtype=int)
-        vb[jstar] = t
-        va[jstar] = 1 ^ t
-        ok = True
-        for i in range(m):
-            if i == jstar:
-                continue
-            rhs = int(M2[i, jstar])
-            if t == 1:
-                vb[i] = rhs
-                va[i] = d[i] ^ rhs
-            else:
-                va[i] = rhs
-                vb[i] = d[i] ^ rhs
-            if (int(va[i]) * (1 ^ t) ^ int(vb[i]) * t) != rhs:
-                ok = False
-                break
-        if not ok:
-            continue
-        va_int = sum(int(va[i]) << (m - 1 - i) for i in range(m))
-        vb_int = sum(int(vb[i]) << (m - 1 - i) for i in range(m))
-        A2 = sorted({va_int, vb_int})
-        mm_check = {(): 0}
-        for i in range(m):
-            mm_check[(i,)] = int(m1[i])
-        for i in range(m):
-            for j in range(i + 1, m):
-                mm_check[(i, j)] = int(M2[i, j])
-        if len(A2) == 2 and moments_of(A2, m, 2) == mm_check:
-            sols.append(A2)
-    return sols
-
-
-def _correct_polluted(mm_noisy, m, max_flip):
-    """代数纠正（算法 10.85.4.01）：枚举翻转 + 两点解析约束校验。"""
-    keys = list(mm_noisy.keys())
-    for k in range(1, max_flip + 1):
-        hits = []
-        for flip in combinations_with_replacement(keys, k):
-            mm2 = dict(mm_noisy)
-            for fk in flip:
-                mm2[fk] ^= 1
-            m1 = np.array([mm2.get((i,), 0) for i in range(m)])
-            M2 = np.zeros((m, m), dtype=int)
-            for i in range(m):
-                for j in range(m):
-                    if i == j:
-                        M2[i, j] = mm2.get((i,), 0)
-                    else:
-                        M2[i, j] = mm2.get(tuple(sorted((i, j))), 0)
-            sols = _solve_two_analytic(m1, M2, m)
-            if sols:
-                hits.append((flip, sols))
-        if hits:
-            return hits
-    return []
