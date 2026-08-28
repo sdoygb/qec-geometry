@@ -198,12 +198,15 @@ def single_ok(mm, m):
     return (M2 == np.outer(m1, m1) % 2).all()
 
 
-def algebra_correct(mm, m, max_flip=2):
+def algebra_correct(mm, m, max_flip=2, use_three=False):
     """算法 10.85.4.02（代数纠正，SCL 前处理版）：
-    翻转 ≤ max_flip 个矩位使矩合法（单点外积 或 两点解析解存在）。
+    翻转 ≤ max_flip 个矩位使矩合法——单点外积（M₂=m₁⊗m₁）、
+    两点解析解、三点差向量解析解（use_three，260828 v3）。
 
-    门级实战（260828，AG(6,2) p=0.003 全开）：
-      旧迭代 SCL 0.00583 → 代数纠正 0.00150（3.9× 改善）。
+    门级实战（260828）：
+      旧迭代 SCL 0.00583 → 代数纠正(两点) 0.00150（3.9× 改善）@p=0.003；
+      p=0.001 → 0。三点约束门级实测有害（假纠正歧义，p=0.003
+      0.006→0.010 变差）——默认关闭，保留为理论工具。
     返回纠正后矩（合法）或 None（无法纠正）。
     """
     keys = list(mm.keys())
@@ -212,11 +215,12 @@ def algebra_correct(mm, m, max_flip=2):
             mm2 = dict(mm)
             for fk in flip:
                 mm2[fk] ^= 1
-            m1 = m1_vec(mm2, m)
-            if not m1.any():
-                continue
             if single_ok(mm2, m):
                 return mm2
-            if solve_two(m1, m2_mat(mm2, m), m):
+            m1 = m1_vec(mm2, m)
+            M2 = m2_mat(mm2, m)
+            if m1.any() and solve_two(m1, M2, m):
+                return mm2
+            if use_three and solve_three(m1, M2, m):
                 return mm2
     return None
