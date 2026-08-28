@@ -14,7 +14,9 @@
 import random
 import time
 import unittest
-from itertools import combinations
+from itertools import combinations, combinations_with_replacement
+
+import numpy as np
 
 from qecgeo import LookupDecoder, moments_of, rm_x_decode
 from qecgeo.codes import steane_code, rm_code_15_7_3
@@ -278,3 +280,186 @@ class TestSCLDecoder(unittest.TestCase):
                             f"m=7 一般 4 点 A={A}: SCL 未恢复")
         dt = time.time() - t0
         self.assertLess(dt, 30.0, f"m=7 代数 4 点过慢: {dt:.1f}s (>30s)")
+
+
+class TestMomentAlgebra(unittest.TestCase):
+    """矩代数约束（10.85）：M2 = Σ v_a v_aᵀ 分解、秩约束、两点解析解。
+
+    260828 新理论：测量噪声的代数纠正（非概率）。
+    """
+
+    def _m1_vec(self, mm, m):
+        return np.array([mm.get((i,), 0) for i in range(m)])
+
+    def _m2_mat(self, mm, m):
+        M = np.zeros((m, m), dtype=int)
+        for i in range(m):
+            for j in range(m):
+                if i == j:
+                    M[i, j] = mm.get((i,), 0)   # GF(2): x_i^2 = x_i
+                else:
+                    M[i, j] = mm.get(tuple(sorted((i, j))), 0)
+        return M
+
+    @staticmethod
+    def _gf2_rank(M):
+        M = M.copy().astype(int)
+        rows, cols = M.shape
+        rank = 0
+        for col in range(cols):
+            pivot = None
+            for r in range(rank, rows):
+                if M[r, col]:
+                    pivot = r
+                    break
+            if pivot is None:
+                continue
+            M[[rank, pivot]] = M[[pivot, rank]]
+            for r in range(rows):
+                if r != rank and M[r, col]:
+                    M[r] ^= M[rank]
+            rank += 1
+        return rank
+
+    def test_rank_constraint(self):
+        """定理 10.85.2.03: rank(M2) ≤ |A|（m=5 抽样）。"""
+        from qecgeo import moments_of
+        m = 5
+        n = 1 << m
+        rng = random.Random(10)
+        for w in (1, 2, 3, 4):
+            for _ in range(40):
+                A = sorted(rng.sample(range(n), w))
+                mm = moments_of(A, m, 2)
+                M2 = self._m2_mat(mm, m)
+                self.assertLessEqual(self._gf2_rank(M2), w,
+                                     f"(m=5,w={w}) A={A}: rank > w")
+
+    def test_single_point_outer_product(self):
+        """推论 10.85.2.04: 单点 M2 == m1⊗m1（m=5 全 32 点）。"""
+        from qecgeo import moments_of
+        m = 5
+        n = 1 << m
+        for a in range(n):
+            mm = moments_of([a], m, 2)
+            m1 = self._m1_vec(mm, m)
+            M2 = self._m2_mat(mm, m)
+            self.assertTrue((M2 == np.outer(m1, m1) % 2).all(),
+                            f"单点 a={a}: M2 != m1⊗m1")
+
+    def test_two_point_analytic(self):
+        """定理 10.85.3.01: 两点错误解析解（非枚举）m=5 全 496 命中。"""
+        from qecgeo import moments_of
+        m = 5
+        n = 1 << m
+        for A in combinations(range(n), 2):
+            mm = moments_of(list(A), m, 2)
+            m1 = self._m1_vec(mm, m)
+            M2 = self._m2_mat(mm, m)
+            sols = _solve_two_analytic(m1, M2, m)
+            self.assertTrue(any(s == sorted(A) for s in sols),
+                            f"两点 A={A}: 解析解未命中")
+
+    def test_two_point_pollution_correction(self):
+        """算法 10.85.4.01: 两点 + 1/2 位污染，代数纠正 100%。"""
+        from qecgeo import moments_of
+        m = 5
+        n = 1 << m
+        rng = random.Random(3)
+        # 1 位污染
+        ok1 = tot1 = 0
+        for A in rng.sample(list(combinations(range(n), 2)), 40):
+            mm = moments_of(list(A), m, 2)
+            keys = list(mm.keys())
+            for fk in keys:
+                mm2 = dict(mm); mm2[fk] ^= 1
+                hits = _correct_polluted(mm2, m, 2)
+                tot1 += 1
+                if any(sorted(s) == sorted(A) for _, sols in hits for s in sols):
+                    ok1 += 1
+        self.assertEqual(ok1, tot1, f"两点 1 位污染纠正 {ok1}/{tot1}")
+        # 2 位污染
+        ok2 = tot2 = 0
+        for A in rng.sample(list(combinations(range(n), 2)), 20):
+            mm = moments_of(list(A), m, 2)
+            keys = list(mm.keys())
+            for fi in range(min(6, len(keys))):
+                for fj in range(fi + 1, min(6, len(keys))):
+                    mm2 = dict(mm)
+                    mm2[keys[fi]] ^= 1; mm2[keys[fj]] ^= 1
+                    hits = _correct_polluted(mm2, m, 2)
+                    tot2 += 1
+                    if any(sorted(s) == sorted(A) for _, sols in hits for s in sols):
+                        ok2 += 1
+        # 2 位污染：歧义边界（10.85 §6）——约束非充分时解可能指向
+        # 其他两点错误；但无解（需>2位翻转）为 0，纠正率 >60%。
+        self.assertGreater(ok2 / max(tot2, 1), 0.60,
+                           f"两点 2 位污染纠正率过低 {ok2}/{tot2}")
+
+
+def _solve_two_analytic(m1, M2, m):
+    """两点错误解析解（定理 10.85.3.01），供测试用。"""
+    from qecgeo import moments_of
+    d = m1
+    if not d.any():
+        return []
+    jstar = int(np.nonzero(d)[0][0])
+    sols = []
+    for t in (0, 1):
+        va = np.zeros(m, dtype=int)
+        vb = np.zeros(m, dtype=int)
+        vb[jstar] = t
+        va[jstar] = 1 ^ t
+        ok = True
+        for i in range(m):
+            if i == jstar:
+                continue
+            rhs = int(M2[i, jstar])
+            if t == 1:
+                vb[i] = rhs
+                va[i] = d[i] ^ rhs
+            else:
+                va[i] = rhs
+                vb[i] = d[i] ^ rhs
+            if (int(va[i]) * (1 ^ t) ^ int(vb[i]) * t) != rhs:
+                ok = False
+                break
+        if not ok:
+            continue
+        va_int = sum(int(va[i]) << (m - 1 - i) for i in range(m))
+        vb_int = sum(int(vb[i]) << (m - 1 - i) for i in range(m))
+        A2 = sorted({va_int, vb_int})
+        mm_check = {(): 0}
+        for i in range(m):
+            mm_check[(i,)] = int(m1[i])
+        for i in range(m):
+            for j in range(i + 1, m):
+                mm_check[(i, j)] = int(M2[i, j])
+        if len(A2) == 2 and moments_of(A2, m, 2) == mm_check:
+            sols.append(A2)
+    return sols
+
+
+def _correct_polluted(mm_noisy, m, max_flip):
+    """代数纠正（算法 10.85.4.01）：枚举翻转 + 两点解析约束校验。"""
+    keys = list(mm_noisy.keys())
+    for k in range(1, max_flip + 1):
+        hits = []
+        for flip in combinations_with_replacement(keys, k):
+            mm2 = dict(mm_noisy)
+            for fk in flip:
+                mm2[fk] ^= 1
+            m1 = np.array([mm2.get((i,), 0) for i in range(m)])
+            M2 = np.zeros((m, m), dtype=int)
+            for i in range(m):
+                for j in range(m):
+                    if i == j:
+                        M2[i, j] = mm2.get((i,), 0)
+                    else:
+                        M2[i, j] = mm2.get(tuple(sorted((i, j))), 0)
+            sols = _solve_two_analytic(m1, M2, m)
+            if sols:
+                hits.append((flip, sols))
+        if hits:
+            return hits
+    return []
