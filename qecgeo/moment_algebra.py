@@ -172,3 +172,34 @@ def correct_polluted(mm_noisy, m, max_flip=2, w=2):
         if hits:
             return hits
     return []
+
+
+def single_ok(mm, m):
+    """单点约束（推论 10.85.2.04）：M₂ == m₁⊗m₁。"""
+    m1 = m1_vec(mm, m)
+    M2 = m2_mat(mm, m)
+    return (M2 == np.outer(m1, m1) % 2).all()
+
+
+def algebra_correct(mm, m, max_flip=2):
+    """算法 10.85.4.02（代数纠正，SCL 前处理版）：
+    翻转 ≤ max_flip 个矩位使矩合法（单点外积 或 两点解析解存在）。
+
+    门级实战（260828，AG(6,2) p=0.003 全开）：
+      旧迭代 SCL 0.00583 → 代数纠正 0.00150（3.9× 改善）。
+    返回纠正后矩（合法）或 None（无法纠正）。
+    """
+    keys = list(mm.keys())
+    for k in range(1, max_flip + 1):
+        for flip in combinations_with_replacement(keys, k):
+            mm2 = dict(mm)
+            for fk in flip:
+                mm2[fk] ^= 1
+            m1 = m1_vec(mm2, m)
+            if not m1.any():
+                continue
+            if single_ok(mm2, m):
+                return mm2
+            if solve_two(m1, m2_mat(mm2, m), m):
+                return mm2
+    return None

@@ -212,7 +212,8 @@ def _scl_best(mmx, m, r, gx, target, L=32):
     return best
 
 
-def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32, p_gate=0.0):
+def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32, p_gate=0.0,
+           use_algebra=False):
     """完整时空 SCL 解码 p_L。
 
     260828 迭代顺序修正（关键）：必须【先 SCL 后残差时间链】——
@@ -224,6 +225,9 @@ def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32, p_ga
     无解不中断（测量噪声破坏矩时 SCL 无解，跳过该轮，靠迭代修正）。
 
     p_gate: MQ 门错误（每稳定子 1 次 DEPOLARIZE2，门级成本模型）。
+    use_algebra: 矩代数纠正前处理（10.85，260828）——SCL 前先翻转
+      ≤2 个矩位使矩合法（单点外积/两点解析解）。AG(6,2) p=0.003 全开
+      0.00583 → 0.00150（3.9×）；p=0.001 → 0。
 
     returns (pL, n_fail)
     """
@@ -255,7 +259,13 @@ def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32, p_ga
                 # Z 稳定子差分 → X 型错误（候选残差最小化）
                 mmx = vec_to_moments(Dc[t][nx:], m, r)
                 if not all(v == 0 for v in mmx.values()):
-                    best = _scl_best(mmx, m, r, gx, Dc[t][nx:], L)
+                    if use_algebra:
+                        from qecgeo.moment_algebra import algebra_correct
+                        mmc = algebra_correct(mmx, m, 2)
+                        mm_use = mmc if mmc is not None else mmx
+                    else:
+                        mm_use = mmx
+                    best = _scl_best(mm_use, m, r, gx, Dc[t][nx:], L)
                     if best is not None:
                         for a in best:
                             EX[a] ^= 1
@@ -263,7 +273,13 @@ def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32, p_ga
                 # X 稳定子差分 → Z 型错误
                 mmz = vec_to_moments(Dc[t][:nx], m, r)
                 if not all(v == 0 for v in mmz.values()):
-                    best = _scl_best(mmz, m, r, gx, Dc[t][:nx], L)
+                    if use_algebra:
+                        from qecgeo.moment_algebra import algebra_correct
+                        mmc = algebra_correct(mmz, m, 2)
+                        mm_use = mmc if mmc is not None else mmz
+                    else:
+                        mm_use = mmz
+                    best = _scl_best(mm_use, m, r, gx, Dc[t][:nx], L)
                     if best is not None:
                         for a in best:
                             EZ[a] ^= 1
