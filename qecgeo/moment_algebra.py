@@ -92,51 +92,68 @@ def solve_two(m1, M2, m):
 
 
 def solve_three(m1, M2, m):
-    """定理 10.85.3.02：三点错误解析解（O(m)，非枚举）。
+    """定理 10.85.3.02（v3，差向量法）：三点错误解析解（O(n·m)，非枚举）。
 
-    取 j* 使 m1[j*]=1，枚举 (va[j*], vb[j*], vc[j*])（权重奇数组合），
-    对每 i 解 2×2 线性方程组。验证：m=5 300/300 命中（100%）。
+    数学（260828）：三点 {a,b,c} 的差向量空间
+      W = M₂ ⊕ m₁⊗m₁ = (v_a⊕v_b)(v_a⊕v_b)ᵀ ⊕ (v_a⊕v_c)(v_a⊕v_c)ᵀ
+    是秩 ≤ 2 矩阵，列空间给出差向量 {u, w}（定义仿射线方向）。
+    枚举平移 v_a（自由参数）得候选 {v_a, v_a⊕u, v_a⊕w}。
+    m₁=0 特例（三点 {a,b,a⊕b} 仿射相关）：W = M₂。
+
+    验证（260828）：m=5 全枚举 4960/4960 命中（100%）——
+    从 v1 通用求解器 9% 覆盖率经差向量法补全。
     """
     d = m1
-    if not d.any():
-        return []
-    jstar = int(np.nonzero(d)[0][0])
-    cands = []
-    for A, B, C in ((1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 1)):
-        va = np.zeros(m, dtype=int)
-        vb = np.zeros(m, dtype=int)
-        vc = np.zeros(m, dtype=int)
-        va[jstar] = A; vb[jstar] = B; vc[jstar] = C
-        ok = True
-        for i in range(m):
-            if i == jstar:
+    W = (M2 + np.outer(d, d)) % 2 if d.any() else M2.copy()
+
+    def gf2_rank(M):
+        M = M.copy().astype(int)
+        rows, cols = M.shape
+        rk = 0
+        for col in range(cols):
+            pivot = None
+            for r in range(rk, rows):
+                if M[r, col]:
+                    pivot = r
+                    break
+            if pivot is None:
                 continue
-            rhs = int(M2[i, jstar])
-            di = int(d[i])
-            # 通用求解：枚举 va[i], vb[i] ∈ {0,1}²（4 候选），
-            # vc[i] = di ^ vai ^ vbi，验证方程 M2[i,j*] 匹配。
-            # 覆盖所有 (A,B,C) 组合（含 B=C=1 秩退化、A 唯一活跃等），
-            # 无分支遗漏（260828 修复：原 Cramer 分支漏 (0,0,1)/(1,1,1) 退化）。
-            solved = False
-            for vai in (0, 1):
-                for vbi in (0, 1):
-                    vci = di ^ vai ^ vbi
-                    lhs = (A * vai) ^ (B * vbi) ^ (C * vci)
-                    if lhs == rhs:
-                        va[i] = vai; vb[i] = vbi; vc[i] = vci
-                        solved = True
-            if not solved:
-                ok = False
-                break
-        if not ok:
-            continue
-        va_int = sum(int(va[i]) << (m - 1 - i) for i in range(m))
-        vb_int = sum(int(vb[i]) << (m - 1 - i) for i in range(m))
-        vc_int = sum(int(vc[i]) << (m - 1 - i) for i in range(m))
-        A3 = sorted({va_int, vb_int, vc_int})
+            M[[rk, pivot]] = M[[pivot, rk]]
+            for r in range(rows):
+                if r != rk and M[r, col]:
+                    M[r] ^= M[rk]
+            rk += 1
+        return rk
+
+    if gf2_rank(W) > 2:
+        return []
+    cols = []
+    for j in range(m):
+        col = W[:, j]
+        if col.any() and all(not np.array_equal(col, c) for c in cols):
+            cols.append(col.copy())
+        if len(cols) >= 2:
+            break
+    if not cols:
+        return []
+    u = cols[0]
+    w = cols[1] if len(cols) >= 2 else None
+    sols = []
+    n = 1 << m
+    for va_int in range(n):
+        va = np.array([(va_int >> (m - 1 - i)) & 1 for i in range(m)])
+        vb = (va + u) % 2
+        vc = (va + w) % 2 if w is not None else (va + u) % 2
+        A3 = sorted({
+            sum(int(va[i]) << (m - 1 - i) for i in range(m)),
+            sum(int(vb[i]) << (m - 1 - i) for i in range(m)),
+            sum(int(vc[i]) << (m - 1 - i) for i in range(m)),
+        })
         if len(A3) == 3 and moments_of(A3, m, 2) == _mm_from(m1, M2, m, 1):
-            cands.append(A3)
-    return cands
+            sols.append(A3)
+            if len(sols) >= 8:
+                break
+    return sols
 
 
 def correct_polluted(mm_noisy, m, max_flip=2, w=2):

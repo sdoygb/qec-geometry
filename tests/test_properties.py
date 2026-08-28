@@ -364,19 +364,38 @@ class TestMomentAlgebra(unittest.TestCase):
                             f"两点 A={A}: 解析解未命中")
 
     def test_three_point_analytic(self):
-        """三点解析解（10.85 §6 开放问题）：有解时正确 100%。
-        覆盖率 ~9%（跨 i 一致性约束待推导）——非交付标准。"""
+        """定理 10.85.3.02（v3 差向量法）：三点解析解 100%（m=5 全 4960）。
+        260828 从 9% 覆盖率经差向量空间 W=M2⊕m1⊗m1 补全。"""
         from qecgeo import moments_of
         from qecgeo.moment_algebra import solve_three, m1_vec, m2_mat
         m = 5
         n = 1 << m
         rng = random.Random(17)
-        for A in rng.sample(list(combinations(range(n), 3)), 200):
+        for A in rng.sample(list(combinations(range(n), 3)), 300):
             mm = moments_of(list(A), m, 2)
             sols = solve_three(m1_vec(mm, m), m2_mat(mm, m), m)
-            if sols:
-                self.assertTrue(any(s == sorted(A) for s in sols),
-                                f"三点 A={A}: 解析解有解但错误")
+            self.assertTrue(any(s == sorted(A) for s in sols),
+                            f"三点 A={A}: 解析解未命中")
+
+    def test_three_point_pollution_correction(self):
+        """算法 10.85.4.01: 三点 + 1 位污染，代数纠正 100%（m=5）。"""
+        from qecgeo import moments_of
+        from qecgeo.moment_algebra import correct_polluted
+        m = 5
+        n = 1 << m
+        rng = random.Random(5)
+        ok = tot = 0
+        for A in rng.sample(list(combinations(range(n), 3)), 25):
+            mm = moments_of(list(A), m, 2)
+            keys = list(mm.keys())
+            for fk in keys:
+                mm2 = dict(mm); mm2[fk] ^= 1
+                hits = correct_polluted(mm2, m, 2, w=3)
+                tot += 1
+                if any(sorted(s) == sorted(A) for _, sols in hits for s in sols):
+                    ok += 1
+        self.assertGreater(ok / max(tot, 1), 0.95,
+                           f"三点 1 位污染纠正 {ok}/{tot}")
 
     def test_two_point_pollution_correction(self):
         """算法 10.85.4.01: 两点 + 1/2 位污染，代数纠正 100%。"""
