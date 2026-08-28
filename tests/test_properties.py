@@ -12,6 +12,7 @@
   6. build_fast ≡ build（向量化与逐项等价）
 """
 import random
+import time
 import unittest
 from itertools import combinations
 
@@ -245,3 +246,35 @@ class TestSCLDecoder(unittest.TestCase):
 
     def test_m6_r3_w5(self):
         self._scl_ok(6, 3, 5, 15)
+
+    def test_m5_r2_w4(self):
+        """r=2 权重 4（含一般 4 点，260828 代数参数化 O(n²·m)）。"""
+        self._scl_ok(5, 2, 4, 30)
+
+    def test_m6_r2_w4(self):
+        """r=2 权重 4，m=6：代数参数化 4 点（旧 O(n⁴) 在此规模可行但慢）。"""
+        self._scl_ok(6, 2, 4, 20)
+
+    def test_m7_r2_w4_perf(self):
+        """m=7 (n=128) 权重 4：O(n⁴) 兜底在此规模不可行（C(128,4)≈1e7），
+        代数参数化必须能在秒级完成——性能回归护栏。"""
+        from qecgeo.rm_scl_decoder import rm_scl_decode
+        n = 1 << 7
+        rng = random.Random(7)
+        t0 = time.time()
+        for _ in range(8):
+            # 一半一般 4 点（d≠0，最坏情形）
+            while True:
+                A = sorted(rng.sample(range(n), 4))
+                mm = moments_of(A, 7, 2)
+                d = 0
+                for i in range(7):
+                    if mm.get((i,), 0):
+                        d |= 1 << (6 - i)
+                if d != 0:
+                    break
+            recs = rm_scl_decode(mm, 7, 2, L=16)
+            self.assertTrue(any(r2 == A for r2 in recs),
+                            f"m=7 一般 4 点 A={A}: SCL 未恢复")
+        dt = time.time() - t0
+        self.assertLess(dt, 30.0, f"m=7 代数 4 点过慢: {dt:.1f}s (>30s)")

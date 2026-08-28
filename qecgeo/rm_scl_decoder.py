@@ -23,13 +23,21 @@
   m=6, r=3, 权重≤7: 30/30（全可纠范围）
   m=6, r=3, 权重6-7: 50/50（高权重，修复后）
 
-修复记录（260827）：r=2 层 4 点分支原只枚举平行四边形，一般 4 点
-（如 A1p=[0,23,24,25]）漏掉导致高权重失败——加一般 4 点兜底（O(n⁴)
-仅小 n 可行）后全范围通过。
+修复记录：
+  - 260827：r=2 层 4 点分支原只枚举平行四边形，一般 4 点（如
+    A1p=[0,23,24,25]）漏掉导致高权重失败——加一般 4 点兜底
+    （O(n⁴) 仅小 n 可行）后全范围通过。
+  - 260828：O(n⁴) 兜底 → O(n²·m) 代数参数化解（见 _four_points_alg）：
+    * 4 点 A={a,a⊕p,a⊕q,a⊕r} 的总 XOR = p⊕q⊕r = 线性矩 d
+    * d=0 ⟹ 4 点必为平行四边形（一般 4 点不存在）——平行四边
+      形枚举即可，且二次矩与 a 无关，可先筛 (p,q) 再解 a
+    * d≠0 ⟹ 4 点 = {a,a⊕p,a⊕q,a⊕p⊕q⊕d}，固定 (p,q) 后二次矩
+      方程对 a 线性（a_j 自由位最多 2 个候选）——O(n²) 枚举替代
+      O(n⁴) 全枚举
+    验证：m=4/5/6 随机 4 点 300/300 公式成立；d=0 ⟹ 平行四边形
+    恒成立。m=7 (n=128) 4 点恢复从 ~1e7 枚举降到 ~16k×m。
 
 已知局限：
-  - 一般 4 点兜底 O(n⁴)：m≥7 时慢（n=128 的 C(128,4)≈1e7 枚举）——
-    大 n 高权重建议仍用 MILP 或优化 4 点路径
   - 可纠范围（权重 ≤ (d−1)/2）内 100%；边界权重（2^r）受矩唯一性
     限制（与 rm_general_decoder 一致）
 """
@@ -38,6 +46,138 @@ from itertools import combinations
 import numpy as np
 
 from qecgeo import moments_of
+
+
+def _decode_two(mm, m):
+    """r=1 基线 / r=2 两点：从线性矩 d 恢复 {a, a⊕d} 全部匹配。"""
+    m1 = [mm.get((i,), 0) for i in range(m)]
+    d = 0
+    for i in range(m):
+        if m1[i]:
+            d |= 1 << (m - 1 - i)
+    if d == 0:
+        return []
+    n = 1 << m
+    matches = []
+    for a in range(n):
+        As = sorted({a, a ^ d})
+        if len(As) == 2 and moments_of(As, m, 2) == mm:
+            matches.append(As)
+    return matches
+
+
+def _four_points_alg(mm, m, L=16):
+    """r=2 四点恢复：代数参数化，O(n²·m)（替代 O(n⁴) 兜底）。
+
+    数学（260828 验证）：
+      A = {a, a⊕p, a⊕q, a⊕r}，总 XOR p⊕q⊕r = 线性矩 d。
+      d=0 ⟹ r = p⊕q（平行四边形），且二次矩
+        m₂[i,j] = p_i p_j ⊕ q_i q_j ⊕ r_i r_j   （与 a 无关！）
+      d≠0 ⟹ r = p⊕q⊕d，二次矩
+        m₂[i,j] = a_i d_j ⊕ a_j d_i ⊕ p_i p_j ⊕ q_i q_j ⊕ r_i r_j
+        固定 (p,q) 后对 a 线性：取 d_j*=1，则
+        a_i = m₂[i,j*] ⊕ a_j*·d_i ⊕ p_i p_j* ⊕ q_i q_j* ⊕ r_i r_j*
+        a_j* ∈ {0,1} → 最多 2 个候选 a。
+
+    流程：枚举 (p,q)（O(n²)），先验二次矩约束（d=0 时只验 (p,q)，
+    与 a 无关；d≠0 时解 a 再验），最后完整矩校验。
+    """
+    n = 1 << m
+    d = 0
+    for i in range(m):
+        if mm.get((i,), 0):
+            d |= 1 << (m - 1 - i)
+
+    def bit(v, i):
+        return (v >> (m - 1 - i)) & 1
+
+    results = []
+    seen = set()
+    if d == 0:
+        # 平行四边形：m2 只依赖 (p,q)，先筛 (p,q) 再枚举 a
+        good_pq = []
+        for p in range(1, n):
+            for q in range(p + 1, n):
+                r = p ^ q
+                # 验二次矩（与 a 无关）
+                ok = True
+                for i in range(m):
+                    for j in range(i + 1, m):
+                        pi, pj = bit(p, i), bit(p, j)
+                        qi, qj = bit(q, i), bit(q, j)
+                        ri, rj = bit(r, i), bit(r, j)
+                        if mm.get((i, j), 0) != (pi * pj ^ qi * qj ^ ri * rj):
+                            ok = False
+                            break
+                    if not ok:
+                        break
+                if ok:
+                    good_pq.append((p, q))
+                    if len(good_pq) > 4 * L:
+                        break
+            if len(good_pq) > 4 * L:
+                break
+        for p, q in good_pq:
+            r = p ^ q
+            # 枚举 a：A = {a, a⊕p, a⊕q, a⊕r}
+            for a in range(n):
+                A4 = sorted({a, a ^ p, a ^ q, a ^ r})
+                if len(A4) == 4:
+                    key = tuple(A4)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    if moments_of(A4, m, 2) == mm:
+                        results.append(A4)
+                        if len(results) >= L:
+                            return results
+    else:
+        # 一般 4 点：固定 (p,q)，解 a（线性方程，≤2 候选）
+        jstar = None
+        for j in range(m):
+            if bit(d, j):
+                jstar = j
+                break
+        for p in range(1, n):
+            for q in range(1, n):
+                if p == q:
+                    continue
+                r = p ^ q ^ d
+                # 预计算常数项 c_ij = p_i p_j ⊕ q_i q_j ⊕ r_i r_j
+                c = [[0] * m for _ in range(m)]
+                for i in range(m):
+                    for j in range(i + 1, m):
+                        pi, pj = bit(p, i), bit(p, j)
+                        qi, qj = bit(q, i), bit(q, j)
+                        ri, rj = bit(r, i), bit(r, j)
+                        c[i][j] = pi * pj ^ qi * qj ^ ri * rj
+                # 对 a_jstar ∈ {0,1} 各解一次 a
+                for aj in (0, 1):
+                    a = 0
+                    if aj:
+                        a |= 1 << (m - 1 - jstar)
+                    ok = True
+                    for i in range(m):
+                        if i == jstar:
+                            continue
+                        # m2[i,j*] = a_i·1 ⊕ aj·d_i ⊕ c
+                        rhs = mm.get((min(i, jstar), max(i, jstar)), 0)
+                        ai = rhs ^ (aj * bit(d, i)) ^ c[min(i, jstar)][max(i, jstar)]
+                        if ai:
+                            a |= 1 << (m - 1 - i)
+                    # 完整校验
+                    A4 = sorted({a, a ^ p, a ^ q, a ^ r})
+                    if len(A4) != 4:
+                        continue
+                    key = tuple(A4)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    if moments_of(A4, m, 2) == mm:
+                        results.append(A4)
+                        if len(results) >= L:
+                            return results
+    return results
 
 
 def rec_list(mm, m, r, L=16, depth=0):
@@ -82,51 +222,36 @@ def rec_list(mm, m, r, L=16, depth=0):
                     a |= 1 << (m - 1 - i)
             if moments_of([a], m, 2) == mm:
                 return [[a]]
+            # 三点 {a, a⊕p, p⊕d}（260828：代数参数化 O(n²) 替代 O(n³)）
+            # 数学：总 XOR a⊕b⊕c = 线性矩 d，令 b = a⊕p：
+            #   c = a⊕b⊕d = a⊕(a⊕p)⊕d = p⊕d。
+            # 枚举 (a, p)，c = p⊕d，二次矩校验。
+            d = a  # 总 XOR（m1 位向量组装值）
             threes = []
-            for x in range(n):
-                for y in range(x + 1, n):
-                    for z in range(y + 1, n):
-                        A3 = [x, y, z]
-                        if moments_of(A3, m, 2) == mm:
-                            threes.append(A3)
-                            if len(threes) >= L:
-                                return threes
+            seen3 = set()
+            for a0 in range(n):
+                for p in range(1, n):
+                    b = a0 ^ p
+                    if b <= a0:
+                        continue
+                    c = p ^ d
+                    if c <= b:
+                        continue
+                    A3 = [a0, b, c]
+                    key = tuple(A3)
+                    if key in seen3:
+                        continue
+                    seen3.add(key)
+                    if moments_of(A3, m, 2) == mm:
+                        threes.append(A3)
+                        if len(threes) >= L:
+                            return threes
             return threes
-        m1 = [mm.get((i,), 0) for i in range(m)]
-        d = 0
-        for i in range(m):
-            if m1[i]:
-                d |= 1 << (m - 1 - i)
-        if d != 0:
-            twos = []
-            for a in range(n):
-                As = sorted({a, a ^ d})
-                if len(As) == 2 and moments_of(As, m, 2) == mm:
-                    twos.append(As)
-            if twos:
-                return twos[:L]
-        fours = []
-        # 平行四边形优先（快）
-        for a in range(n):
-            for d1 in range(1, n):
-                for d2 in range(d1 + 1, n):
-                    A4 = sorted({a, a ^ d1, a ^ d2, a ^ d1 ^ d2})
-                    if len(A4) == 4 and moments_of(A4, m, 2) == mm:
-                        fours.append(A4)
-                        if len(fours) >= L:
-                            return fours
-        # 一般 4 点兜底（非平行四边形，260827 修复——此前漏掉）
-        if len(fours) < L:
-            for x in range(n):
-                for y in range(x + 1, n):
-                    for z in range(y + 1, n):
-                        for w in range(z + 1, n):
-                            A4 = [x, y, z, w]
-                            if moments_of(A4, m, 2) == mm:
-                                fours.append(A4)
-                                if len(fours) >= L:
-                                    return fours
-        return fours
+        # m0 = 0：2 点或 4 点
+        twos = _decode_two(mm, m)
+        if twos:
+            return twos[:L]
+        return _four_points_alg(mm, m, L)
     # ---- r ≥ 3：坐标投影递归（列表）----
     for i0 in range(m):
         rem = [i for i in range(m) if i != i0]

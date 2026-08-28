@@ -148,8 +148,41 @@ def logical_parity(E, lz):
     return sum(E[j] for j in lz) & 1
 
 
+def _scl_best(mmx, m, r, gx, target, L=32):
+    """SCL 候选残差最小化：从矩解出的全部候选里，选 syndrome 与目标
+    （差分位向量）残差权重最小的——残差即测量错误贡献（260828）。
+
+    测量噪声污染矩后，SCL 返回多个候选，取第一个常错；残差最小化
+    近似最大似然（选最能解释观测的错误集）。无解返回 None（不中断）。
+    """
+    cands = rm_scl_decode(mmx, m, r, L=L)
+    if not cands:
+        return None
+    best = None
+    bestw = None
+    for A in cands:
+        s = np.zeros(len(gx), dtype=int)
+        for a in A:
+            for k2, g in enumerate(gx):
+                if g[a]:
+                    s[k2] ^= 1
+        w = int(np.bitwise_xor(s, target).sum())
+        if bestw is None or w < bestw:
+            bestw = w
+            best = A
+    return best
+
+
 def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32):
     """完整时空 SCL 解码 p_L。
+
+    260828 迭代顺序修正（关键）：必须【先 SCL 后残差时间链】——
+    先时间链会把数据错误 syndrome 也当测量错误吞掉（解码输出恒 0，
+    p_L = obs 率）。正确流程：
+      迭代 0：逐轮 SCL（候选残差最小化）解数据错误 e_t
+      迭代 ≥1：残差 r_t = d_t ⊕ H·e_hat_t ≈ m_t ⊕ m_{t-1}
+              → 1D 重复码时间链解测量错误 m_hat → 扣回 → 重新 SCL
+    无解不中断（测量噪声破坏矩时 SCL 无解，跳过该轮，靠迭代修正）。
 
     returns (pL, n_fail)
     """
@@ -163,43 +196,31 @@ def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32):
     for i in range(shots):
         # 差分矩阵 (Rm1, 2nx)
         D = dets[i].reshape(Rm1, 2 * nx)
-        # 交替时空解码（迭代）：
-        #   d_t = H·e_t ⊕ m_t ⊕ m_{t-1}
-        # 迭代 0：假设无测量噪声，逐轮 SCL 解 e_t（初步）
-        # 迭代 ≥1：残差 r_t = d_t ⊕ H·e_hat_t ≈ m_t ⊕ m_{t-1}
-        #          → 时间链解 m_hat → 扣回 → 重新 SCL
         EX = np.zeros(n, dtype=int)   # X 型错误累积（翻转逻辑 Z 测量）
         EZ = np.zeros(n, dtype=int)   # Z 型错误累积
         Dc = np.array(D, dtype=int).copy()
-        ok = True
         for it in range(3):
             # SCL 解当前差分（迭代 0 用原始 D，之后用扣回后的 Dc）
             EX[:] = 0; EZ[:] = 0
             EX_per = [np.zeros(n, dtype=int) for _ in range(Rm1)]
             EZ_per = [np.zeros(n, dtype=int) for _ in range(Rm1)]
             for t in range(Rm1):
-                # Z 稳定子差分 → X 型错误
+                # Z 稳定子差分 → X 型错误（候选残差最小化）
                 mmx = vec_to_moments(Dc[t][nx:], m, r)
                 if not all(v == 0 for v in mmx.values()):
-                    cands = rm_scl_decode(mmx, m, r, L=L)
-                    if not cands:
-                        ok = False
-                        break
-                    for a in cands[0]:
-                        EX[a] ^= 1
-                        EX_per[t][a] ^= 1
+                    best = _scl_best(mmx, m, r, gx, Dc[t][nx:], L)
+                    if best is not None:
+                        for a in best:
+                            EX[a] ^= 1
+                            EX_per[t][a] ^= 1
                 # X 稳定子差分 → Z 型错误
                 mmz = vec_to_moments(Dc[t][:nx], m, r)
                 if not all(v == 0 for v in mmz.values()):
-                    cands = rm_scl_decode(mmz, m, r, L=L)
-                    if not cands:
-                        ok = False
-                        break
-                    for a in cands[0]:
-                        EZ[a] ^= 1
-                        EZ_per[t][a] ^= 1
-            if not ok:
-                break
+                    best = _scl_best(mmz, m, r, gx, Dc[t][:nx], L)
+                    if best is not None:
+                        for a in best:
+                            EZ[a] ^= 1
+                            EZ_per[t][a] ^= 1
             # 残差 → 测量错误时间链 → 扣回（迭代 ≥1）
             if it < 2 and p_meas > 0:
                 res = np.zeros((Rm1, 2 * nx), dtype=int)
@@ -221,9 +242,6 @@ def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32):
                 Dc = np.array(D, dtype=int).copy()
                 for t in range(Rm1):
                     Dc[t] ^= m_hat2[t + 1] ^ m_hat2[t]
-        if not ok:
-            n_fail += 1
-            continue
         # 逻辑错误检查：最终 Z 测量只被 X 错误翻转
         if logical_parity(EX, lz) != int(obs[i, 0]):
             n_fail += 1
