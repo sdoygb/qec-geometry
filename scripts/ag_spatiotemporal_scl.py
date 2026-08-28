@@ -143,6 +143,45 @@ def time_chain_decode(diffs, p_meas):
     return m_hat
 
 
+def pair_time_chain(D):
+    """成对时间链（260828，测量噪声-矩交互减半的关键）。
+
+    只抓"时间相邻成对"翻转（测量错误 m_t 污染 d_t 与 d_{t+1}）：
+    相邻差分位 (t, t+1) 同为 1 ⟹ m_{t+1} 翻转，从差分扣除。
+    孤立翻转（单轮）不抓——那是数据错误 syndrome（空间相关）或
+    未配对测量错误，留给 SCL 解。
+
+    与完整前缀和时间链（time_chain_decode）的区别：后者会把数据
+    错误 syndrome 也配成测量错误链（解码输出恒 0，p_L=obs 率）；
+    成对版只抓干净的成对测量错误，不动数据错误 syndrome。
+
+    D: (rounds-1, 2nx) 差分数组
+    返回 (m_hat, Dc)：测量错误估计 (rounds, 2nx) + 扣除后差分
+    """
+    Rm1, nx2 = D.shape
+    R = Rm1 + 1
+    m_hat = np.zeros((R, nx2), dtype=int)
+    Dc = np.array(D, dtype=int).copy()
+    for _ in range(R):
+        changed = False
+        for k in range(nx2):
+            flips = np.where(Dc[:, k] == 1)[0]
+            i = 0
+            while i < len(flips):
+                if i + 1 < len(flips) and flips[i + 1] == flips[i] + 1:
+                    # 成对 (t, t+1) → m_{t+1} 翻转（测量错误）
+                    m_hat[flips[i] + 1, k] ^= 1
+                    for t in (flips[i], flips[i] + 1):
+                        Dc[t, k] ^= 1
+                    changed = True
+                    i += 2
+                else:
+                    i += 1
+        if not changed:
+            break
+    return m_hat, Dc
+
+
 def logical_parity(E, lz):
     """数据错误 E（位向量）在逻辑 Z 支撑 lz 上的奇偶 = 逻辑错误。"""
     return sum(E[j] for j in lz) & 1
@@ -173,7 +212,7 @@ def _scl_best(mmx, m, r, gx, target, L=32):
     return best
 
 
-def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32):
+def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32, p_gate=0.0):
     """完整时空 SCL 解码 p_L。
 
     260828 迭代顺序修正（关键）：必须【先 SCL 后残差时间链】——
@@ -184,10 +223,12 @@ def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32):
               → 1D 重复码时间链解测量错误 m_hat → 扣回 → 重新 SCL
     无解不中断（测量噪声破坏矩时 SCL 无解，跳过该轮，靠迭代修正）。
 
+    p_gate: MQ 门错误（每稳定子 1 次 DEPOLARIZE2，门级成本模型）。
+
     returns (pL, n_fail)
     """
     n = 1 << m
-    c, gx, lz = build_memory_circuit(m, r, rounds, p_data, p_meas, seed=seed)
+    c, gx, lz = build_memory_circuit(m, r, rounds, p_data, p_meas, p_gate=p_gate, seed=seed)
     sampler = c.compile_detector_sampler(seed=seed)
     dets, obs = sampler.sample(shots, separate_observables=True)
     nx = len(gx)
@@ -196,6 +237,12 @@ def run_pL(m, r, rounds, p_data, p_meas, shots, seed=0, use_scl=True, L=32):
     for i in range(shots):
         # 差分矩阵 (Rm1, 2nx)
         D = dets[i].reshape(Rm1, 2 * nx)
+        # 成对时间链预处理（260828）：只抓干净成对测量错误，
+        # 孤立翻转留给 SCL——避免完整时间链吞掉数据错误 syndrome。
+        # 仅对零简并（r≥2）启用：r=1 有简并，成对扣除使矩更稀、
+        # 候选选择更易错（实测 AG(4,1) 0.030→0.035 变差）。
+        if p_meas > 0 and r >= 2:
+            _, D = pair_time_chain(D)
         EX = np.zeros(n, dtype=int)   # X 型错误累积（翻转逻辑 Z 测量）
         EZ = np.zeros(n, dtype=int)   # Z 型错误累积
         Dc = np.array(D, dtype=int).copy()
