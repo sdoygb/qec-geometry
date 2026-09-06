@@ -467,10 +467,13 @@ over m[0]∈{0,1}) → subtract → re-SCL:
 | code | condition | old (last-diff only) | complete SCL | gain |
 |---|---|---|---|---|
 | **AG(6,2) [[64,20,8]]** | p=0.001, p_meas=0, r=3 | 0.0085 | **0.00000** (0/2000) | ∞ |
-| AG(6,2) | p=0.001, p_meas=0, r=5 | — | **0.00000** (0/2000) | ∞ |
-| AG(6,2) | p=0.001, p_meas=0.001, r=5 | — | **0.0010** | 8.5× |
+| AG(6,2) | p=0.001, p_meas=0, r=5 | — | **0.00000** (0/3000) | ∞ |
+| AG(6,2) | p=0.001, p_meas=0.001, r=5 | — | **0.00033** (1/3000) | 26× |
+| AG(6,2) | p=0.001, p_meas=0.01, r=5 | (was stuck) | **0.00767** (23/3000) | ∞ |
+| AG(6,2) | p=0.003, p_meas=0, r=5 | — | **0.00000** (0/2000) | ∞ |
+| AG(6,2) | p=0.01, p_meas=0, r=5 | — | **0.00100** (2/2000) | — |
 | **AG(4,1) [[16,6,4]]** | p=0.01, p_meas=0, r=3 | 0.0575* | **0.0057** | 10× |
-| AG(4,1) | p=0.01, p_meas=0.01, r=4 | 0.075 | **0.0128** | 5.9× |
+| AG(4,1) | p=0.01, p_meas=0.01, r=4 | 0.075 | **0.0090** | 8.3× |
 
 (*old 0.0575 = last-diff-only baseline after the commutation fix; 0.0085 was
 the CNOT-decomposition gate-level number, superseded by the MQ model.)
@@ -478,9 +481,22 @@ Implementation notes: detectors must be appended immediately after each round's
 MR (rec is relative to the append point; a delayed append makes every detector
 identically zero); X-stabilizer measurements detect Z-type errors and
 vice-versa (commutation, not label); time-chain decode is the prefix-sum
-m[t]=m[0]⊕Σ_{i<t}d[i] with min-weight choice of m[0]. Known boundary: the
-r=2 general-4-point fallback is O(n⁴) and makes p_meas=0.01 sweeps slow on
-AG(6,2) (4-point candidates dominate when measurement noise corrupts moments).
+m[t]=m[0]⊕Σ_{i<t}d[i] with min-weight choice of m[0].
+
+**r=2 四点/三点代数参数化**（`qecgeo/rm_scl_decoder.py`，260828）：4 点
+A={a,a⊕p,a⊕q,a⊕r} 的总 XOR = p⊕q⊕r = 线性矩 d。d=0 ⟹ 必为平行四边形
+（二次矩只依赖 (p,q)，先筛再解 a）；d≠0 ⟹ 4 点 =
+{a,a⊕p,a⊕q,a⊕p⊕q⊕d}，固定 (p,q) 后二次矩方程对 a 线性（≤2 候选）。
+3 点 {a,a⊕p,p⊕d} 同理 O(n²)。**O(n⁴) → O(n²·m)**：m=7 (n=128) 一般
+4 点 0.52s（旧 C(128,4)≈1e7 不可行）；m=6 全范围 300 次 82s→8s。
+验证 m=4/5/6 随机 4 点 300/300 公式成立；tests +3（含 m=7 性能护栏）。
+
+**迭代顺序关键修正**（`scripts/ag_spatiotemporal_scl.py` run_pL，
+260828）：必须【先 SCL 后残差时间链】——先时间链会把数据错误
+syndrome 也当测量错误吞掉（解码输出恒 0，p_L = obs 率 0.023）；
+且 SCL 用候选残差最小化（`_scl_best`，测量噪声污染矩时取第一个
+候选常错，选 syndrome 与差分残差权重最小者），无解不中断。这使
+p_meas=0.01 的 AG(6,2) 扫描从"卡死 45min"变成 268s 完成，p_L 0.110→0.0077。
 
 **sinter.Decoder integration (complete)** — the custom-decoder interface lives
 in **sinter** (bundled with stim 1.16), not stim itself. `LookupSinterDecoder`
@@ -499,6 +515,41 @@ and `sinter.collect` runs the full comparison (`scripts/sinter_collect_demo.py`)
 applied to another — not a valid benchmark), demonstrating decoder–code
 mismatch only. Numbers above are from `data/sinter_benchmark.csv`
 (5000 shots/cell, sinter 1.16, reproducible).
+
+**AG vs surface：同一 MQ 门级模型**（260906，`scripts/surface_mq.py` +
+`scripts/ag_vs_surface_mq.py`，原始数据 `data/ag_vs_surface_mq_p5r.csv`）：
+把 surface 码放进与 AG 完全相同的 MQ 门级模型——每稳定子每轮
+1×DEPOLARIZE2(p) on (ancilla, 1 参与数据)（all-to-all 平台每稳定子计
+1 个多体门，与支撑权重无关）+ ancilla MR flip + 轮间数据 depolarize，
+CNOT 链错误归零。surface 电路 = stim 官方 `rotated_memory_z` 只替换
+错误模型（逻辑 Z / 稳定子 / DETECTOR 保持官方构造），解码
+pymatching(MWPM)；AG 用自身 SCL 矩解码（`run_pL`, p_gate=p_data=p）。
+rounds=5，seed 42，2000 shots/格：
+
+| code | n,k,d | rate | p_meas | p=0.001 | p=0.003 | p=0.01 |
+|---|---|---|---|---|---|---|
+| **AG(6,2) [[64,20,8]]** | 20/64 | 0.3125 | 0 | 0.00050 | 0.00250 | 0.02100 |
+| AG(6,2) | | | p | 0.00050 | 0.00550 | 0.05550 |
+| **AG(4,1) [[16,6,4]]** | 6/16 | 0.375 | 0 | 0.00000 | 0.00050 | 0.01300 |
+| AG(4,1) | | | p | 0.00000 | 0.00150 | 0.02100 |
+| **surface d=3 [[17,1,3]]** | 1/17 | 0.059 | 0 | 0.00200 | 0.00450 | 0.01900 |
+| surface d=3 | | | p | 0.00100 | 0.00650 | 0.01650 |
+| **surface d=5 [[41,1,5]]** | 1/41 | 0.024 | 0 | 0.00050 | 0.00050 | 0.00100 |
+| surface d=5 | | | p | 0.00000 | 0.00000 | 0.00150 |
+| **surface d=7 [[97,1,7]]** | 1/97 | 0.010 | 0 | 0.00000 | 0.00000 | 0.00000 |
+| surface d=7 | | | p | 0.00000 | 0.00000 | 0.00050 |
+
+实测观察（如实记录，不做超越性结论）：
+- 同物理 p 下两族都按 d 分层；在该 MQ 模型 + 原生解码器组合下，小支撑
+  稳定子 + MWPM 的 surface（d=5/7）p_L 低于同等 p 的 AG(6,2)（d=8，
+  p=0.003: surface d5 0.0005 vs AG(6,2) 0.0025）。AG 的对照优势在参数空间
+  而非同 p p_L：`[[64,20,8]]` 以 64 物理比特编码 20 逻辑比特（rate 0.312），
+  surface d=7 以 97 比特编码 1 逻辑比特（rate 0.010）。
+- 对照含内在混淆，逐项注明：解码器不同（SCL vs MWPM，均为各自原生最优）；
+  稳定子支撑权重 AG 16–64 vs surface ≤4，而 MQ 记账每稳定子只计 1 个
+  DEPOLARIZE2（对高支撑 AG 有利的假设，未计 w 依赖的门的物理成本）；
+  数据 depolarize / MR 位置数 ∝ n。即本表是"模型 + 原生解码器"的联合
+  实测，不能单独归因于码族。
 
 ## Honest limitations
 
@@ -539,6 +590,11 @@ mismatch only. Numbers above are from `data/sinter_benchmark.csv`
   recovered by the zero-degeneracy theorem, w ≥ d conservatively counted as
   failure); the stim multi-round AG(4,1) lookup-vs-pymatching comparison is
   fully simulated (same circuit-level noise model).
+- **AG vs surface MQ (260906)**: surface rows use the stim-official circuit
+  transformed to the MQ gate model + pymatching; AG rows use its own SCL
+  decoder. The cross-family table compares *equal physical p* under the
+  MQ gate-cost assumption (one 2-body DEPOLARIZE2 per stabilizer, independent
+  of stabilizer weight) — not a rate- or decoder-matched benchmark.
 
 ### 4. AG complete-code closed forms: parameters without circuits (NEW)
 
